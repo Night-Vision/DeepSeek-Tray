@@ -3,7 +3,6 @@ import AppKit
 
 struct DashboardView: View {
     @EnvironmentObject var tracker: UsageTracker
-    @ObservedObject private var auth = AuthManager.shared
     @State private var copiedToastVisible = false
 
     var body: some View {
@@ -11,9 +10,6 @@ struct DashboardView: View {
             header
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 16) {
-                    if auth.state.apiKeyLinked && !auth.state.googleSessionLinked {
-                        cookieBanner
-                    }
                     statCards
                     WeeklyUsageChartView(daily: tracker.snapshot.dailyTotals)
                     KeyBreakdownListView(keys: tracker.snapshot.keyBreakdown)
@@ -24,22 +20,6 @@ struct DashboardView: View {
         }
         .padding(Metrics.padding)
         .background(Color.dsPopover)
-    }
-
-    private var cookieBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.dsAccentAmber)
-            Text("Sign in with Google to see usage stats")
-                .font(.system(size: 11))
-                .foregroundColor(.dsTextSecondary)
-            Spacer()
-        }
-        .padding(10)
-        .background(Color.dsPopoverSubtle)
-        .overlay(RoundedRectangle(cornerRadius: Metrics.radiusInner).stroke(Color.dsAccentAmber.opacity(0.3), lineWidth: 1))
-        .cornerRadius(Metrics.radiusInner)
     }
 
     private var header: some View {
@@ -68,16 +48,16 @@ struct DashboardView: View {
 
     private var statCards: some View {
         let snapshot = tracker.snapshot
-        return VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: "USD")
-                StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests")
+        return VStack(spacing: 16) {
+            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: "USD", subtitle: snapshot.usageCurrency)
+            StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests")
+            StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens")
+            if let balance = snapshot.balance {
+                StatCard(title: "BALANCE", value: "\(currencySymbol(balance.currency))\(balance.totalBalance)", sub: balance.currency)
             }
-            HStack(spacing: 8) {
-                StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens")
-                if let balance = snapshot.balance {
-                    StatCard(title: "BALANCE", value: "\(currencySymbol(balance.currency))\(balance.totalBalance)", sub: balance.currency)
-                }
+
+            if let session = snapshot.liveSession, !session.turns.isEmpty {
+                SessionStatsView(sessionTracker: SessionUsageTracker.shared, model: snapshot.currentModelProfile ?? .default)
             }
         }
     }
@@ -158,22 +138,31 @@ struct StatCard: View {
     let title: String
     let value: String
     let sub: String
+    var subtitle: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 10))
-                .foregroundColor(.dsTextSecondary)
+            HStack {
+                Text(title)
+                    .font(.system(size: 11))
+                    .foregroundColor(.dsTextSecondary)
+                Spacer()
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundColor(.dsTextTertiary)
+                }
+            }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundColor(.dsTextPrimary)
                 Text(sub)
-                    .font(.system(size: 9))
-                    .foregroundColor(.dsTextTertiary)
+                    .font(.system(size: 11))
+                    .foregroundColor(.dsAccentGreen)
             }
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.dsPopoverSubtle)
         .overlay(RoundedRectangle(cornerRadius: Metrics.radiusInner).stroke(Color.white.opacity(0.05), lineWidth: 1))

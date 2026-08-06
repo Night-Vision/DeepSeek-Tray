@@ -22,6 +22,10 @@ struct UsageSnapshot {
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
 
+    // Live session stats from direct API calls
+    var liveSession: SessionStats?
+    var currentModelProfile: ModelProfile?
+
     static let empty = UsageSnapshot(
         balance: nil,
         totalCost: 0,
@@ -31,7 +35,9 @@ struct UsageSnapshot {
         dailyTotals: [],
         hourlyTotalsToday: [],
         keyBreakdown: [],
-        lastUpdated: Date()
+        lastUpdated: Date(),
+        liveSession: nil,
+        currentModelProfile: nil
     )
 
     static let mock: UsageSnapshot = {
@@ -76,7 +82,9 @@ struct UsageSnapshot {
                 KeyUsage(name: "Prod-Server-App", maskedKeyId: "sk-8f2a...991c", tokens: 37_000_000, percentage: 69.9),
                 KeyUsage(name: "Local-Dev-CLI", maskedKeyId: "sk-4b19...00ab", tokens: 15_910_584, percentage: 30.1)
             ],
-            lastUpdated: Date()
+            lastUpdated: Date(),
+            liveSession: nil,
+            currentModelProfile: nil
         )
     }()
 }

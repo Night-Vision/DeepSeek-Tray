@@ -18,8 +18,11 @@ struct OfficialBalanceClient: BalanceClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        guard http.statusCode == 200 else {
+            throw HTTPError.status(code: http.statusCode, endpoint: "balance API")
         }
 
         let dto = try JSONDecoder().decode(BalanceResponse.self, from: data)

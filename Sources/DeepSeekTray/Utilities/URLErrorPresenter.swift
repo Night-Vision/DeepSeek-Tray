@@ -12,7 +12,8 @@ enum URLErrorPresenter {
         -1013: "Auth required (401)",
         -1200: "Secure connection failed",
         -1202: "Server cert not trusted",
-        -1203: "Server cert not honored"
+        -1203: "Server cert not honored",
+        -1011: "Server error (HTTP)"
     ]
 
     static func shortSummary(for description: String) -> String {
@@ -28,5 +29,17 @@ enum URLErrorPresenter {
         guard let r = s.range(of: pattern, options: .regularExpression) else { return nil }
         let raw = s[r].trimmingCharacters(in: CharacterSet(charactersIn: ")"))
         return Int(raw)
+    }
+}
+
+// Carries the HTTP status so failures name their source instead of surfacing as generic -1011
+enum HTTPError: LocalizedError {
+    case status(code: Int, endpoint: String)
+
+    var errorDescription: String? {
+        if case let .status(code, endpoint) = self {
+            return "HTTP \(code) — \(endpoint)"
+        }
+        return nil
     }
 }

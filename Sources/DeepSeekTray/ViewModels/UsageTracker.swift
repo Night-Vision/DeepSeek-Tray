@@ -14,6 +14,7 @@ final class UsageTracker: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let preferences = PreferencesStore.shared
     private let auth = AuthManager.shared
+    private let sessionTracker = SessionUsageTracker.shared
 
     private init() {
         snapshot = .empty
@@ -40,68 +41,51 @@ final class UsageTracker: ObservableObject {
 
     func refresh() async {
         let key = KeychainManager.get(account: "apiKey")
-        let cookie = KeychainManager.get(account: "sessionCookie")
 
-        async let balanceTask: BalanceInfo? = {
-            if let key = key, !key.isEmpty {
-                try? await OfficialBalanceClient(apiKey: key).fetchBalance()
-            } else { nil }
-        }()
-
-        async let usageTask: UsageSnapshot? = {
-            if let cookie = cookie, !cookie.isEmpty {
-                try await WebDashboardUsageClient(sessionCookie: cookie).fetchUsage()
-            } else { nil }
-        }()
-
-        do {
-            let balance = await balanceTask
-            let usage = try await usageTask
-
-            await MainActor.run { [balance, usage] in
-                var merged = usage ?? .empty
-                if let balance = balance {
-                    merged.balance = balance
-                }
-                snapshot = merged
-                lastError = nil
-                updateTrayLabelText()
-                snapshot.lastUpdated = Date()
+        var balanceError: String?
+        let balance: BalanceInfo?
+        if let key = key, !key.isEmpty {
+            do {
+                balance = try await OfficialBalanceClient(apiKey: key).fetchBalance()
+            } catch {
+                balance = nil
+                balanceError = error.localizedDescription
             }
-        } catch UsageClientError.authenticationExpired {
-            await MainActor.run {
-                auth.signOut(method: "sessionCookie")
-                lastError = "Session expired. Please sign in again."
-                appendToLastErrorLog(lastError ?? "")
-                snapshot.lastUpdated = Date()
-            }
-        } catch {
-            await MainActor.run {
-                lastError = error.localizedDescription
-                appendToLastErrorLog(lastError ?? "")
-                snapshot.lastUpdated = Date()
-            }
+        } else {
+            balance = nil
+        }
+
+        await MainActor.run { [balance, balanceError] in
+            var merged = UsageSnapshot.empty
+            merged.balance = balance
+            sessionTracker.currentModel = preferences.activeModelProfile
+            merged.liveSession = sessionTracker.currentSession
+            merged.currentModelProfile = preferences.activeModelProfile
+            snapshot = merged
+            lastError = balanceError
+            updateTrayLabelText()
+            snapshot.lastUpdated = Date()
         }
     }
 
-    private static var lastErrorLogURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("DeepSeekTray", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("last-error.txt")
-    }
-
-    private func appendToLastErrorLog(_ message: String) {
-        let line = "\(Date())\t\(message)\n"
-        if let data = line.data(using: .utf8) {
-            if let handle = try? FileHandle(forWritingTo: Self.lastErrorLogURL) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                _ = try? handle.write(contentsOf: data)
-            } else {
-                try? data.write(to: Self.lastErrorLogURL, options: .atomic)
-            }
+    // Make a chat completion call and track its usage in real time (Reasonix-style)
+    func sendChat(messages: [ChatMessage], model: String? = nil) async throws -> ChatCompletionResponse {
+        guard let apiKey = KeychainManager.get(account: "apiKey"), !apiKey.isEmpty else {
+            throw URLError(.userAuthenticationRequired)
         }
+
+        let service = ChatCompletionService(apiKey: apiKey)
+        let selectedModel = model ?? preferences.activeModelProfile.modelId
+        let response = try await service.send(messages: messages, model: selectedModel)
+
+        sessionTracker.recordTurn(from: response)
+        sessionTracker.currentModel = preferences.activeModelProfile
+        var updated = snapshot
+        updated.liveSession = sessionTracker.currentSession
+        updated.currentModelProfile = preferences.activeModelProfile
+        updated.lastUpdated = Date()
+        snapshot = updated
+        return response
     }
 
     func updateTrayLabelText() {

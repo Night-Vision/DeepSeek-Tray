@@ -10,11 +10,15 @@
 
 # Session / agent state
 .reasonix/
+reasonix.toml
 
 # Internal agent plans / workspace metadata (not for the repo)
 docs/superpowers/
 docs/Integration-Plan.md
 AGENTS.md
+
+# SDD scratch workspace
+.superpowers/
 
 # Xcode
 *.xcuserstate
