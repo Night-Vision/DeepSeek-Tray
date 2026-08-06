@@ -1096,6 +1096,25 @@
             </div>
         </div>
 
+        <!-- VIEW 5: TRAY CONTEXT MENU (RIGHT-CLICK) -->
+        <div class="popover-column">
+            <div class="column-title">5. Tray Context Menu (Right-Click)</div>
+            <div class="popover-card" style="padding: 14px; max-width: 260px;">
+                <div class="mini-header" style="margin-bottom: 6px;">
+                    <span class="mini-title" style="font-size: 11px;">DS: 42.8k/h</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#0066FF"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                </div>
+                <div style="display: flex; flex-direction: column;">
+                    <div class="key-item" style="margin-bottom: 2px;">Refresh Now <span style="color: var(--text-tertiary); font-size: 10px;">⌘R</span></div>
+                    <div class="key-item" style="margin-bottom: 2px;">Open Dashboard</div>
+                    <div class="key-item" style="margin-bottom: 2px;">Open Mini Widget</div>
+                    <div class="key-item" style="margin-bottom: 2px;">Preferences… <span style="color: var(--text-tertiary); font-size: 10px;">⌘,</span></div>
+                    <div style="height: 1px; background: var(--border-color); margin: 6px 0;"></div>
+                    <div class="key-item">Quit DeepSeek Tray <span style="color: var(--text-tertiary); font-size: 10px;">⌘Q</span></div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Technical Architecture Specifications -->
@@ -1135,6 +1154,25 @@
                     <li>Compact 1/4th footprint designed for rapid glanceability.</li>
                     <li>Renders <b>today's hourly token usage</b> with dynamic Y-axis in K tokens (`15k`, `7.5k`, `0k`).</li>
                     <li>Includes <b>3-hour X-axis time marks</b> (`8 AM`, `11 AM`, `2 PM`, `5 PM`) and an <b>Expand Dashboard</b> button to restore View 1.</li>
+                </ul>
+            </div>
+
+            <div class="spec-card">
+                <h3>5. Tray Context Menu (Right-Click)</h3>
+                <ul>
+                    <li><b>Left-click</b> toggles the popover (Main Overview / Mini / Preferences / Auth).</li>
+                    <li><b>Right-click</b> pops the context menu: <b>Refresh Now</b> (`⌘R`), <b>Open Dashboard</b>, <b>Open Mini Widget</b>, <b>Preferences…</b> (`⌘,`), separator, <b>Quit DeepSeek Tray</b> (`⌘Q`).</li>
+                    <li>Menu items route through the same <code>UsageTracker</code> state as the popover views.</li>
+                    <li>Note: dashboard usage totals (cost/requests/tokens) populate automatically — the SSO sheet's JS interceptor captures the platform's usage API (endpoint + headers) and replays it via <code>DiscoveredDashboardUsageClient</code>; until then stat cards show balance + live session data.</li>
+                </ul>
+            </div>
+            <div class="spec-card">
+                <h3>6. SSO Discovery Flow</h3>
+                <ul>
+                    <li>Sign-in sheet (<code>WebSSOSheet</code>) injects a fetch/XHR interceptor at <code>.documentStart</code> and presents standalone (never as a sheet on the tray popover).</li>
+                    <li>Capture is gated on a real auth cookie — pre-login/stale cookies are ignored, so the window never closes early.</li>
+                    <li>After login the sheet drives the dashboard; the first usage-shaped response stores <code>ds_discovered_usage_endpoint</code> (url, method, headers — no bodies).</li>
+                    <li>Window closes only on successful capture or manual close; the endpoint persists across launches.</li>
                 </ul>
             </div>
         </div>

@@ -10,6 +10,9 @@ struct PreferencesView: View {
 
             VStack(spacing: 0) {
                 ToggleRow(title: "Compact Mini Mode", desc: "Default popover to Option 4 Mini Widget", isOn: $prefs.compactMiniDefault)
+                    .onChange(of: prefs.compactMiniDefault) { newValue in
+                        tracker.show(newValue ? .mini : .dashboard)
+                    }
                 RefreshIntervalRow()
                 TrayStyleRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)

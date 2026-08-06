@@ -7,9 +7,11 @@ A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://pl
 ## Features
 
 - **Balance monitoring** — live API-key balance via the official `GET /user/balance` endpoint
-- **Usage dashboard** — token/cost totals, daily stats, and per-model breakdown from your DeepSeek dashboard
+- **Live session tracking** — real-time token/cost stats from chat-completion responses (`sendChat`), with a context-window usage bar
 - **Tray display modes** — tokens per hour, monthly total, or estimated cost right in the menu bar label
+- **Right-click tray menu** — Refresh Now, Open Dashboard, Open Mini Widget, Preferences…, Quit
 - **Flexible sign-in** — API key or Google SSO (in-app WKWebView sheet), secrets stored in macOS Keychain
+- **Automatic usage discovery** — the SSO sheet captures the platform's usage API (endpoint, headers) and re-enables cost/tokens/charts
 - **Mini widget & charts** — compact popover widget and weekly usage chart
 - **Dark theme** — designed around a custom DS design system
 
@@ -36,8 +38,8 @@ swift build -c release
 
 Two ways to connect your account:
 
-1. **API key** — paste a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys); balance is fetched from the official API.
-2. **Google SSO** — sign in through the in-app web sheet; the session cookie is captured and stored securely in Keychain.
+1. **API key** — paste a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys); balance is fetched from the official API. This is the primary data source.
+2. **Google SSO** — sign in through the in-app web sheet; the session cookie is captured and stored securely in Keychain. The sheet also auto-discovers the dashboard's usage API (endpoint + headers) so cost/tokens/charts populate.
 
 Credentials live in the macOS Keychain under service `com.deepseek.tray` — never in plain files.
 
@@ -52,4 +54,4 @@ Credentials live in the macOS Keychain under service `com.deepseek.tray` — nev
 
 ---
 
-> **Note:** dashboard usage data comes from DeepSeek's web dashboard endpoint and requires an authenticated session cookie.
+> **Note:** dashboard usage totals (cost/requests/tokens) populate automatically once the SSO sheet captures the platform's usage endpoint during sign-in; until then the stat cards reflect balance + live session data.

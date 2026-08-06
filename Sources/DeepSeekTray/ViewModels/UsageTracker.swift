@@ -55,12 +55,31 @@ final class UsageTracker: ObservableObject {
             balance = nil
         }
 
-        await MainActor.run { [balance, balanceError] in
+        // Best-effort dashboard usage via the discovered endpoint (if any).
+        // Failure keeps .empty usage defaults and never clobbers balanceError.
+        var usage: UsageSnapshot?
+        if let cookie = KeychainManager.get(account: "sessionCookie"), !cookie.isEmpty,
+           let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
+            usage = try? await DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: cookie).fetchUsage()
+        }
+
+        await MainActor.run { [balance, balanceError, usage] in
             var merged = UsageSnapshot.empty
             merged.balance = balance
             sessionTracker.currentModel = preferences.activeModelProfile
             merged.liveSession = sessionTracker.currentSession
             merged.currentModelProfile = preferences.activeModelProfile
+
+            if let usage {
+                merged.totalCost = usage.totalCost
+                merged.totalRequests = usage.totalRequests
+                merged.totalTokens = usage.totalTokens
+                merged.usageCurrency = usage.usageCurrency
+                merged.dailyTotals = usage.dailyTotals
+                merged.hourlyTotalsToday = usage.hourlyTotalsToday
+                merged.keyBreakdown = usage.keyBreakdown
+            }
+
             snapshot = merged
             lastError = balanceError
             updateTrayLabelText()
