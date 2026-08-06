@@ -1,0 +1,22 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Local app data (SQLite, not source)
+.freebuff/
+
+# Session / agent state
+.reasonix/
+
+# Internal agent plans / workspace metadata (not for the repo)
+docs/superpowers/
+docs/Integration-Plan.md
+AGENTS.md
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
