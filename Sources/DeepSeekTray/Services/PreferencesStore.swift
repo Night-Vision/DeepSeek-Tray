@@ -13,6 +13,7 @@ enum TrayDisplayStyle: String, CaseIterable, Identifiable {
 }
 
 enum RefreshInterval: String, CaseIterable, Identifiable {
+    case one = "1"
     case five = "5"
     case fifteen = "15"
     case sixty = "60"
