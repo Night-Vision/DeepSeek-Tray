@@ -46,20 +46,10 @@ final class AuthManager: ObservableObject {
         let sheet = WebSSOSheet(siteURL: url)
         sheet.start { [weak self] ok in
             if ok {
-                self?.persistGoogleToken()
+                // The fresh JWT is saved to Keychain by WebSSOSheet during capture.
                 self?.state.googleSessionLinked = true
             }
             completion(ok)
-        }
-    }
-
-    /// The SSO credential is the Bearer JWT in the captured usage endpoint's
-    /// authorization header. Store it in Keychain so login survives relaunch.
-    private func persistGoogleToken() {
-        guard let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() else { return }
-        for (name, value) in endpoint.headers where name.lowercased() == "authorization" {
-            _ = KeychainManager.save(account: "googleToken", value: value)
-            return
         }
     }
 

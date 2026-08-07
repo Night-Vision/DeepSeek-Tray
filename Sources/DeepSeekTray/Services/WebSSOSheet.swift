@@ -251,6 +251,18 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
 
         let headers = (dict["headers"] as? [String: Any])?
             .compactMapValues { $0 as? String } ?? [:]
+
+        // The platform fires multiple usage-shaped calls; prefer the known-good
+        // "amount" schema and ignore billing/cost variants (different shape).
+        let lower = url.lowercased()
+        if lower.contains("cost") || lower.contains("billing") { return }
+
+        // Persist the fresh Bearer JWT NOW, from the raw capture — the sanitized
+        // endpoint saved below no longer carries it (security fix).
+        for (name, value) in headers where name.lowercased() == "authorization" {
+            _ = KeychainManager.save(account: "googleToken", value: value)
+        }
+
         DiscoveredDashboardUsageClient.saveEndpoint(
             DiscoveredDashboardUsageClient.DiscoveredEndpoint(
                 url: url,
