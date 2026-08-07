@@ -9,7 +9,7 @@ struct PreferencesView: View {
             header
 
             VStack(spacing: 0) {
-                ToggleRow(title: "Compact Mini Mode", desc: "Default popover to Option 4 Mini Widget", isOn: $prefs.compactMiniDefault)
+                ToggleRow(title: "Compact Mini Mode", desc: "Open the mini widget by default", isOn: $prefs.compactMiniDefault)
                 RefreshIntervalRow()
                 TrayStyleRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)

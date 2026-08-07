@@ -20,7 +20,19 @@ struct DiscoveredDashboardUsageClient {
     // MARK: - Storage
 
     static func saveEndpoint(_ endpoint: DiscoveredEndpoint) {
-        if let data = try? JSONEncoder().encode(endpoint) {
+        // Security: never persist the live credential — the authorization
+        // (Bearer JWT) / cookie headers are re-injected from Keychain at fetch
+        // time. Keep only non-secret x-client-* headers.
+        let sanitized = DiscoveredEndpoint(
+            url: endpoint.url,
+            method: endpoint.method,
+            headers: endpoint.headers.filter { (name, _) in
+                let lower = name.lowercased()
+                return lower != "authorization" && lower != "cookie" && lower != "set-cookie"
+            },
+            discoveredAt: endpoint.discoveredAt
+        )
+        if let data = try? JSONEncoder().encode(sanitized) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
@@ -31,6 +43,20 @@ struct DiscoveredDashboardUsageClient {
             return nil
         }
         return endpoint
+    }
+
+    // MARK: - Auth header injection
+
+    /// The credential is never stored with the endpoint: the Bearer JWT lives in
+    /// Keychain (googleToken). Inject it at fetch time, falling back to any
+    /// non-secret captured headers (x-client-*) that the platform still requires.
+    private func authHeaders() -> [String: String] {
+        var headers = endpoint.headers
+        if !headers.keys.contains(where: { $0.lowercased() == "authorization" }),
+           let jwt = KeychainManager.get(account: "googleToken") {
+            headers["Authorization"] = jwt
+        }
+        return headers
     }
 
     // MARK: - Fetch
@@ -46,7 +72,7 @@ struct DiscoveredDashboardUsageClient {
         if let cookie, !cookie.isEmpty {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
-        for (name, value) in endpoint.headers {
+        for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -69,7 +95,7 @@ struct DiscoveredDashboardUsageClient {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 10
-        for (name, value) in endpoint.headers {
+        for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }
         let (data, response) = try await URLSession.shared.data(for: request)

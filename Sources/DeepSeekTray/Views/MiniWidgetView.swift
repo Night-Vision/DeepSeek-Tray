@@ -107,7 +107,7 @@ struct MiniWidgetView: View {
     }
 
     private func todayTotal() -> Int {
-        tracker.snapshot.totalTokens
+        tracker.snapshot.dailyTotals.last?.totalTokens ?? 0
     }
 
     private func average() -> Int {

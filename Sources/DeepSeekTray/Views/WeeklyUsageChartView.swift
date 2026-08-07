@@ -15,24 +15,41 @@ struct WeeklyUsageChartView: View {
                     .foregroundColor(.dsAccentBlue)
             }
 
+            // Axis and bars are the same 90pt height and bottom-aligned, so the max
+            // tick lands exactly on a full-height bar's top; weekday labels sit below.
             HStack(alignment: .bottom, spacing: 6) {
                 yAxis
                 bars
             }
+            HStack(spacing: 4) {
+                ForEach(shownDays) { day in
+                    Text(dayLabel(day.date))
+                        .font(.system(size: 10))
+                        .foregroundColor(isToday(day.date) ? .dsAccentBlue : .dsTextTertiary)
+                        .frame(width: 16)
+                }
+            }
+            .padding(.leading, 44)
         }
     }
 
     private var yAxis: some View {
         let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
-        return VStack(alignment: .trailing, spacing: 0) {
-            ForEach([bounds[0], bounds[1], bounds[2]], id: \.self) { value in
-                Text(formatK(Int(value)))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.dsTextTertiary)
-                    .frame(height: 30, alignment: .center)
-            }
+        return ZStack(alignment: .top) {
+            Text(formatK(Int(bounds[0])))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.dsTextTertiary)
+                .frame(maxHeight: .infinity, alignment: .top)
+            Text(formatK(Int(bounds[1])))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.dsTextTertiary)
+                .frame(maxHeight: .infinity, alignment: .center)
+            Text(formatK(Int(bounds[2])))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.dsTextTertiary)
+                .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .frame(height: 88)
+        .frame(width: 38, height: 90)
     }
 
     private var bars: some View {
@@ -40,12 +57,7 @@ struct WeeklyUsageChartView: View {
         let maxValue = bounds[0]
         return HStack(alignment: .bottom, spacing: 4) {
             ForEach(shownDays) { day in
-                VStack(spacing: 6) {
-                    stackedBar(day: day, maxValue: maxValue)
-                    Text(dayLabel(day.date))
-                        .font(.system(size: 10))
-                        .foregroundColor(isToday(day.date) ? .dsAccentBlue : .dsTextTertiary)
-                }
+                stackedBar(day: day, maxValue: maxValue)
             }
         }
     }
@@ -59,10 +71,17 @@ struct WeeklyUsageChartView: View {
     private func stackedBar(day: DailyUsage, maxValue: Double) -> some View {
         let total = max(day.totalTokens, 1)
         return VStack(spacing: 0) {
-            ForEach(day.breakdown) { item in
+            if day.breakdown.isEmpty {
+                // Fallback: never render an invisible bar — draw the full total.
                 Rectangle()
-                    .fill(colorFor(item.category))
-                    .frame(height: barHeight(tokens: item.tokens, max: maxValue, total: total))
+                    .fill(Color.dsGradientStart)
+                    .frame(height: barHeight(tokens: day.totalTokens, max: maxValue, total: total))
+            } else {
+                ForEach(day.breakdown) { item in
+                    Rectangle()
+                        .fill(colorFor(item.category))
+                        .frame(height: barHeight(tokens: item.tokens, max: maxValue, total: total))
+                }
             }
         }
         .frame(height: barHeight(tokens: day.totalTokens, max: maxValue, total: total))
@@ -72,7 +91,7 @@ struct WeeklyUsageChartView: View {
 
     private func barHeight(tokens: Int, max: Double, total: Int) -> CGFloat {
         guard max > 0, total > 0 else { return 0 }
-        return CGFloat(Double(tokens) / max) * 70
+        return CGFloat(Double(tokens) / max) * 90
     }
 
     private func average() -> Int {

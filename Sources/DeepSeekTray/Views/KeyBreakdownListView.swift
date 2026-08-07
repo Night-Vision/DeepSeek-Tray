@@ -33,6 +33,13 @@ struct KeyBreakdownListView: View {
                 .background(Color.dsPopoverSubtle)
                 .cornerRadius(Metrics.radiusInner)
             }
+
+            if keys.isEmpty {
+                Text("No key usage data yet — refresh to load it.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.dsTextTertiary)
+                    .padding(.vertical, 6)
+            }
         }
     }
 }

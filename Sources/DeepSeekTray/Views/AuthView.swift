@@ -179,6 +179,7 @@ struct AuthView: View {
 extension View {
     func darkTextField() -> some View {
         self
+            .textFieldStyle(.plain)
             .font(.system(size: 11))
             .padding(8)
             .background(Color.dsPopoverSubtle)

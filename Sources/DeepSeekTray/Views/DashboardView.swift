@@ -35,11 +35,6 @@ struct DashboardView: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusBadge(text: "Active", warning: false)
-                Button(action: { tracker.show(.mini) }) {
-                    Image(systemName: "arrow.down.right.arrow.up.left")
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(IconButtonStyle())
             }
         }
         .padding(.bottom, 14)
@@ -49,7 +44,7 @@ struct DashboardView: View {
     private var statCards: some View {
         let snapshot = tracker.snapshot
         return VStack(spacing: 16) {
-            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: "USD", subtitle: snapshot.usageCurrency)
+            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: snapshot.usageCurrency)
             StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests")
             StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens")
             if let balance = snapshot.balance {

@@ -127,7 +127,16 @@ final class UsageTracker: ObservableObject {
         case .monthly:
             trayLabelText = "\(prefix) \(TokenFormatter.short(snapshot.totalTokens))"
         case .cost:
-            trayLabelText = "\(prefix) $\(String(format: "%.2f", snapshot.totalCost))"
+            let symbol = currencySymbol(snapshot.usageCurrency)
+            trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", snapshot.totalCost))"
+        }
+    }
+
+    private func currencySymbol(_ code: String) -> String {
+        switch code.uppercased() {
+        case "CNY": return "¥"
+        case "USD": return "$"
+        default: return ""
         }
     }
 
