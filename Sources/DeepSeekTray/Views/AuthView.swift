@@ -168,6 +168,7 @@ struct AuthView: View {
             if ok {
                 tracker.currentView = .dashboard
                 message = "Signed in to DeepSeek."
+                Task { await tracker.refresh() }
             } else {
                 message = "Sign-in was cancelled. Paste your Cookie header below instead."
             }

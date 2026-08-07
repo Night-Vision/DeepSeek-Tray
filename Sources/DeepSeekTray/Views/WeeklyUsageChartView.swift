@@ -23,7 +23,7 @@ struct WeeklyUsageChartView: View {
     }
 
     private var yAxis: some View {
-        let bounds = ChartAxis.niceBounds(for: daily.map { $0.totalTokens })
+        let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
         return VStack(alignment: .trailing, spacing: 0) {
             ForEach([bounds[0], bounds[1], bounds[2]], id: \.self) { value in
                 Text(formatK(Int(value)))
@@ -36,10 +36,10 @@ struct WeeklyUsageChartView: View {
     }
 
     private var bars: some View {
-        let bounds = ChartAxis.niceBounds(for: daily.map { $0.totalTokens })
+        let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
         let maxValue = bounds[0]
         return HStack(alignment: .bottom, spacing: 4) {
-            ForEach(daily) { day in
+            ForEach(shownDays) { day in
                 VStack(spacing: 6) {
                     stackedBar(day: day, maxValue: maxValue)
                     Text(dayLabel(day.date))
@@ -48,6 +48,12 @@ struct WeeklyUsageChartView: View {
                 }
             }
         }
+    }
+
+    /// The chart is "7-Day" — only ever render the most recent 7 entries so a
+    /// longer history (e.g. 30 days) can't overflow the fixed-width popover.
+    private var shownDays: [DailyUsage] {
+        Array(daily.suffix(7))
     }
 
     private func stackedBar(day: DailyUsage, maxValue: Double) -> some View {
@@ -70,8 +76,9 @@ struct WeeklyUsageChartView: View {
     }
 
     private func average() -> Int {
-        guard !daily.isEmpty else { return 0 }
-        return daily.map { $0.totalTokens }.reduce(0, +) / daily.count
+        let days = shownDays
+        guard !days.isEmpty else { return 0 }
+        return days.map { $0.totalTokens }.reduce(0, +) / days.count
     }
 
     private func formatK(_ value: Int) -> String {

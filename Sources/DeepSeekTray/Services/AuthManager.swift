@@ -10,7 +10,10 @@ final class AuthManager: ObservableObject {
 
     private init() {
         state.apiKeyLinked = KeychainManager.get(account: "apiKey") != nil
-        state.googleSessionLinked = KeychainManager.get(account: "sessionCookie") != nil
+        // Header-based SSO persists the Bearer JWT under googleToken;
+        // sessionCookie is the legacy manual-paste path.
+        state.googleSessionLinked = KeychainManager.get(account: "googleToken") != nil
+            || KeychainManager.get(account: "sessionCookie") != nil
     }
 
     func signInWithAPIKey(_ key: String, label: String) async -> Bool {
@@ -43,9 +46,20 @@ final class AuthManager: ObservableObject {
         let sheet = WebSSOSheet(siteURL: url)
         sheet.start { [weak self] ok in
             if ok {
+                self?.persistGoogleToken()
                 self?.state.googleSessionLinked = true
             }
             completion(ok)
+        }
+    }
+
+    /// The SSO credential is the Bearer JWT in the captured usage endpoint's
+    /// authorization header. Store it in Keychain so login survives relaunch.
+    private func persistGoogleToken() {
+        guard let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() else { return }
+        for (name, value) in endpoint.headers where name.lowercased() == "authorization" {
+            _ = KeychainManager.save(account: "googleToken", value: value)
+            return
         }
     }
 
@@ -56,10 +70,15 @@ final class AuthManager: ObservableObject {
             state.apiKeyLinked = false
         case "sessionCookie":
             KeychainManager.delete(account: "sessionCookie")
+            KeychainManager.delete(account: "googleToken")
+            // The endpoint config is useless without the JWT; drop it too.
+            UserDefaults.standard.removeObject(forKey: "ds_discovered_usage_endpoint")
             state.googleSessionLinked = false
         default:
             KeychainManager.delete(account: "apiKey")
             KeychainManager.delete(account: "sessionCookie")
+            KeychainManager.delete(account: "googleToken")
+            UserDefaults.standard.removeObject(forKey: "ds_discovered_usage_endpoint")
             state = AuthState()
         }
     }

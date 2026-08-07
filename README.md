@@ -39,9 +39,19 @@ swift build -c release
 Two ways to connect your account:
 
 1. **API key** — paste a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys); balance is fetched from the official API. This is the primary data source.
-2. **Google SSO** — sign in through the in-app web sheet; the session cookie is captured and stored securely in Keychain. The sheet also auto-discovers the dashboard's usage API (endpoint + headers) so cost/tokens/charts populate.
+2. **Google SSO** — sign in through an in-app WKWebView window; the sheet intercepts the platform's usage API traffic and captures it (endpoint + auth headers) so cost/tokens/charts populate automatically.
 
-Credentials live in the macOS Keychain under service `com.deepseek.tray` — never in plain files.
+### How SSO works (exact flow)
+
+1. "Sign in with Google" opens a **standalone** WKWebView window (never a sheet on the tray popover, which would close on resign-key).
+2. A JS interceptor is injected at `documentStart` (all frames) that shadows `fetch`/`XMLHttpRequest` and forwards `url, method, status, body (≤30KB), headers` to Swift.
+3. You complete Google OAuth; the platform's `/authorized` callback loads.
+4. **Auth is header-based, not cookie-based**: the platform SPA keeps a Bearer JWT client-side and sends it per-request (`authorization` + `x-client-*` headers). No session cookie ever exists — this is why cookie-based capture could never work.
+5. The SPA navigates to the Usage page and fires the usage API; the interceptor catches it and Swift validates the response is usage-shaped JSON.
+6. The sheet stores `ds_discovered_usage_endpoint` (`url`, `method`, `headers`, `discoveredAt` — never bodies) in UserDefaults, then **auto-closes**.
+7. `UsageTracker.refresh()` replays that endpoint (relative URLs resolved against `https://platform.deepseek.com`, captured headers as auth) alongside the balance fetch; failures fall back to empty defaults without touching the balance error.
+
+Credentials live in the macOS Keychain under service `com.deepseek.tray` — never in plain files. (The SSO JWT rides inside the stored endpoint config in UserDefaults; move to Keychain if you want it hardened.)
 
 ## Security
 

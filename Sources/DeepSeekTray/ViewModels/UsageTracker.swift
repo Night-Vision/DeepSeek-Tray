@@ -58,8 +58,8 @@ final class UsageTracker: ObservableObject {
         // Best-effort dashboard usage via the discovered endpoint (if any).
         // Failure keeps .empty usage defaults and never clobbers balanceError.
         var usage: UsageSnapshot?
-        if let cookie = KeychainManager.get(account: "sessionCookie"), !cookie.isEmpty,
-           let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
+        if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
+            let cookie = KeychainManager.get(account: "sessionCookie")
             usage = try? await DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: cookie).fetchUsage()
         }
 

@@ -2,13 +2,16 @@ import AppKit
 import WebKit
 
 @MainActor
-final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler {
+final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler, WKHTTPCookieStoreObserver {
     private let webView: WKWebView
     private var contentController: WKUserContentController?
     private let siteURL: URL
     private var pendingCompletion: ((Bool) -> Void)?
     private var saved = false
     private var pendingDiscovery = false
+    private var observingCookies = false
+    private var baselineDeepSeekCookies: [String: String] = [:]
+    private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
 
     // Intercepts fetch/XHR on the platform site and forwards usage-shaped traffic to Swift.
     private static let interceptorScript = """
@@ -84,6 +87,8 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
 
         let frame = NSRect(x: 0, y: 0, width: 480, height: 640)
         let webView = WKWebView(frame: frame, configuration: config)
+        // Some platforms gate features on the user agent; present as Safari.
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         self.webView = webView
 
         super.init(
@@ -109,6 +114,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        if observingCookies { cookieStore.remove(self) }
         contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
     }
 
@@ -123,17 +129,76 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        print("[WebSSOSheet] didFinish: \(webView.url?.absoluteString ?? "?") title: \(webView.title ?? "?")")
+
         // Only evaluate cookies on the DeepSeek platform itself, never on Google
         // sign-in intermediates. Skip the pre-login /sign_in page.
         guard let host = webView.url?.host,
               host == "platform.deepseek.com" || host.hasSuffix(".deepseek.com"),
               let url = webView.url?.absoluteString,
               !url.contains("/sign_in") else { return }
-        evaluateCookies()
+
+        // The OAuth callback page (/authorized) loads before the session cookie
+        // exists; it's set by the SPA's follow-up requests, which never fire
+        // didFinish. Snapshot the pre-login deepseek.com cookies, then let
+        // WKHTTPCookieStoreObserver fire on any cookie change — no polling, no
+        // time cap.
+        cookieStore.getAllCookies { [weak self] all in
+            let snapshot = Dictionary(uniqueKeysWithValues: all
+                .filter { $0.domain == "deepseek.com" || $0.domain.hasSuffix(".deepseek.com") }
+                .map { ($0.name, $0.value) })
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.baselineDeepSeekCookies = snapshot
+                if !self.observingCookies {
+                    self.cookieStore.add(self)
+                    self.observingCookies = true
+                }
+                self.evaluateCookies()
+                self.schedulePageStateProbe()
+            }
+        }
+    }
+
+    // 10s after the OAuth callback: dump the page state so we can see whether
+    // the SPA is stuck on a spinner, an error, or actually reached the dashboard.
+    private func schedulePageStateProbe() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self, !self.saved else { return }
+            self.webView.evaluateJavaScript("""
+                JSON.stringify({ ready: document.readyState, href: location.href,
+                                 title: document.title,
+                                 body: (document.body ? document.body.innerText : '').slice(0, 200) })
+            """) { result, error in
+                if let error {
+                    print("[WebSSOSheet] probe error: \(error.localizedDescription)")
+                } else if let json = result as? String {
+                    print("[WebSSOSheet] probe: \(json)")
+                }
+            }
+        }
+    }
+
+    // MARK: - WKHTTPCookieStoreObserver
+
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        print("[WebSSOSheet] cookiesDidChange fired")
+        DispatchQueue.main.async { [weak self] in self?.evaluateCookies() }
+    }
+
+    // MARK: - WKNavigationDelegate failures
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        print("[WebSSOSheet] didFail: \(error.localizedDescription)")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        print("[WebSSOSheet] didFailProvisional: \(error.localizedDescription)")
     }
 
     private func evaluateCookies() {
-        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+        guard !saved else { return }
+        cookieStore.getAllCookies { [weak self] cookies in
             DispatchQueue.main.async { self?.captureAndStore(cookies) }
         }
     }
@@ -145,9 +210,13 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         print("[WebSSOSheet] page: \(webView.url?.absoluteString ?? "?")")
         print("[WebSSOSheet] cookies: \(cookies.map(\.name).sorted())")
 
-        // Gate on a real auth cookie — pre-login/stale cookies (csrftoken, CF,
-        // leftover session) must not trigger capture or dismissal.
-        guard hasAuthCookie(cookies) else { return }
+        // Gate: capture when any deepseek.com cookie changed vs the pre-login
+        // snapshot — a new name OR a changed value (the session cookie may reuse
+        // an existing name, e.g. smidV2). Values compared in memory only.
+        guard cookies.contains(where: { cookie in
+            guard cookie.domain == "deepseek.com" || cookie.domain.hasSuffix(".deepseek.com") else { return false }
+            return baselineDeepSeekCookies[cookie.name] != cookie.value
+        }) else { return }
 
         let header = cookies
             .filter { $0.domain == "deepseek.com" || $0.domain.hasSuffix(".deepseek.com") }
@@ -165,14 +234,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
                 webView.load(URLRequest(url: URL(string: "https://platform.deepseek.com/dashboard")!))
             }
         }
-    }
-
-    // ponytail: heuristic seed for DeepSeek's session cookie name — refine from
-    // the evidence log after one real login.
-    private static let authCookieNames: Set<String> = ["session", "jwt", "token", "access_token", "auth", "user"]
-
-    private func hasAuthCookie(_ cookies: [HTTPCookie]) -> Bool {
-        cookies.contains { Self.authCookieNames.contains($0.name.lowercased()) }
     }
 
     // MARK: - WKScriptMessageHandler
@@ -198,11 +259,12 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
                 discoveredAt: Date()
             )
         )
-        finishDiscovery()
+        // Endpoint captured = auth succeeded (auth rides in the captured request
+        // headers, not a cookie). Close the sheet and let the app poll it.
+        handleDismiss(success: true)
     }
 
-    private func hasUsageShape(_ body: String) -> Bool {
-        guard let data = body.data(using: .utf8),
+    private func hasUsageShape(_ body: String) -> Bool {        guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) else { return false }
         return containsUsageKey(json)
     }
@@ -236,6 +298,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     private func handleDismiss(success: Bool) {
         guard !saved else { return }
         saved = true
+        if observingCookies {
+            cookieStore.remove(self)
+            observingCookies = false
+        }
         let completion = pendingCompletion
         pendingCompletion = nil
 
