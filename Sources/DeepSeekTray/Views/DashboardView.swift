@@ -103,6 +103,10 @@ struct DashboardView: View {
         }
         .overlay(
             HStack(spacing: 8) {
+                Button(action: { tracker.show(.mini) }) {
+                    Image(systemName: "arrow.left.and.right")
+                }
+                .buttonStyle(IconButtonStyle())
                 Button(action: { Task { await tracker.refresh() } }) {
                     Image(systemName: "arrow.clockwise")
                 }

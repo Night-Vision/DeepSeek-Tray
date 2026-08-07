@@ -3,22 +3,27 @@ import SwiftUI
 struct MiniWidgetView: View {
     @EnvironmentObject var tracker: UsageTracker
 
+    /// The platform API is daily-granularity; show the last 7 days.
+    private var shownDays: [DailyUsage] {
+        Array(tracker.snapshot.dailyTotals.suffix(7))
+    }
+
     var body: some View {
         VStack(spacing: 8) {
             header
             Text(TokenFormatter.short(todayTotal()))
                 .font(.system(size: 22, weight: .heavy))
                 .foregroundColor(.dsTextPrimary)
-            Text("Peak: \(TokenFormatter.short(peak())) @ \(peakHour())")
+            Text("Avg: \(TokenFormatter.short(average()))/day")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.dsAccentGreen)
 
-            hourlyChart
+            weeklyChart
 
             Button(action: { tracker.show(.dashboard) }) {
                 HStack(spacing: 5) {
                     Text("Expand Dashboard")
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    Image(systemName: "arrow.right.and.left")
                         .font(.system(size: 10))
                 }
                 .font(.system(size: 11, weight: .semibold))
@@ -46,7 +51,7 @@ struct MiniWidgetView: View {
                 Image(systemName: "chart.bar.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.dsAccentBlue)
-                Text("TODAY HOURLY")
+                Text("7-DAY TREND")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.dsTextSecondary)
                     .tracking(0.5)
@@ -58,31 +63,29 @@ struct MiniWidgetView: View {
         }
     }
 
-    private var hourlyChart: some View {
-        let hours = tracker.snapshot.hourlyTotalsToday
-        let bounds = ChartAxis.niceBounds(for: hours.map { $0.tokens })
+    private var weeklyChart: some View {
+        let days = shownDays
+        let bounds = ChartAxis.niceBounds(for: days.map { $0.totalTokens })
         let maxValue = bounds[0]
         return HStack(alignment: .bottom, spacing: 6) {
             yAxis
             VStack(spacing: 4) {
-                HStack(alignment: .bottom, spacing: 2) {
-                    ForEach(hours) { hour in
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(days) { day in
                         Rectangle()
-                            .fill(hour.hour == currentHour()
-                                  ? LinearGradient(colors: [Color(hex: "64D2FF"), .dsAccentBlue], startPoint: .top, endPoint: .bottom)
-                                  : LinearGradient(colors: [.dsGradientStart, .dsGradientEnd], startPoint: .top, endPoint: .bottom))
-                            .frame(height: barHeight(tokens: hour.tokens, max: maxValue))
+                            .fill(LinearGradient(colors: [.dsGradientStart, .dsGradientEnd], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 14, height: barHeight(tokens: day.totalTokens, max: maxValue))
                             .cornerRadius(2)
                     }
                 }
-                .frame(height: 42)
+                .frame(height: 42, alignment: .bottom)
                 .overlay(Divider().background(Color.white.opacity(0.1)), alignment: .bottom)
 
                 HStack {
-                    ForEach(timeMarks, id: \.self) { mark in
-                        Text(mark)
+                    ForEach(days) { day in
+                        Text(dayLabel(day.date))
                             .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.dsTextTertiary)
+                            .foregroundColor(isToday(day.date) ? .dsAccentBlue : .dsTextTertiary)
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -91,7 +94,7 @@ struct MiniWidgetView: View {
     }
 
     private var yAxis: some View {
-        let bounds = ChartAxis.niceBounds(for: tracker.snapshot.hourlyTotalsToday.map { $0.tokens })
+        let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
         return VStack(alignment: .trailing, spacing: 0) {
             ForEach([bounds[0], bounds[1], bounds[2]], id: \.self) { value in
                 Text(formatK(Int(value)))
@@ -103,34 +106,14 @@ struct MiniWidgetView: View {
         .frame(height: 60)
     }
 
-    private var timeMarks: [String] {
-        let hours = tracker.snapshot.hourlyTotalsToday
-        guard let first = hours.first?.hour, let last = hours.last?.hour else { return [] }
-        let span = last - first
-        let step = max(span / 3, 1)
-        return (0...3).compactMap { idx -> String? in
-            let hour = first + idx * step
-            guard hour <= last else { return nil }
-            return formatHour(hour)
-        }
-    }
-
     private func todayTotal() -> Int {
-        let hourly = tracker.snapshot.hourlyTotalsToday.map { $0.tokens }.reduce(0, +)
-        return hourly > 0 ? hourly : tracker.snapshot.totalTokens
+        tracker.snapshot.totalTokens
     }
 
-    private func peak() -> Int {
-        tracker.snapshot.hourlyTotalsToday.map { $0.tokens }.max() ?? 0
-    }
-
-    private func peakHour() -> String {
-        guard let hour = tracker.snapshot.hourlyTotalsToday.max(by: { $0.tokens < $1.tokens })?.hour else { return "-" }
-        return formatHour(hour)
-    }
-
-    private func currentHour() -> Int {
-        Calendar.current.component(.hour, from: Date())
+    private func average() -> Int {
+        let days = shownDays
+        guard !days.isEmpty else { return 0 }
+        return days.map { $0.totalTokens }.reduce(0, +) / days.count
     }
 
     private func barHeight(tokens: Int, max: Double) -> CGFloat {
@@ -143,12 +126,13 @@ struct MiniWidgetView: View {
         return TokenFormatter.short(value)
     }
 
-    private func formatHour(_ hour: Int) -> String {
-        let h = hour % 24
-        let suffix = h < 12 ? "AM" : "PM"
-        let display = h % 12 == 0 ? 12 : h % 12
-        return "\(display) \(suffix)"
+    private func dayLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEEE"
+        return f.string(from: date)
+    }
+
+    private func isToday(_ date: Date) -> Bool {
+        Calendar.current.isDateInToday(date)
     }
 }
-
-

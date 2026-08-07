@@ -5,7 +5,7 @@ enum TrayDisplayStyle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .hourly: return "Hourly Tokens"
+        case .hourly: return "Today's Tokens"
         case .monthly: return "Monthly Tokens"
         case .cost: return "Est. Cost"
         }

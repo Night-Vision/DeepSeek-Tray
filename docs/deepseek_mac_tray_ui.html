@@ -1152,7 +1152,7 @@
                 <h3>4. Option 4: Compact Mini Interface</h3>
                 <ul>
                     <li>Compact 1/4th footprint designed for rapid glanceability.</li>
-                    <li>Renders <b>today's hourly token usage</b> with dynamic Y-axis in K tokens (`15k`, `7.5k`, `0k`).</li>
+                    <li>Renders the <b>7-day trend</b> (daily granularity) with dynamic Y-axis in K tokens (`231M`, `115M`, `0`); the platform API no longer exposes hourly buckets, so the widget shows `Avg: X/day`.</li>
                     <li>Includes <b>3-hour X-axis time marks</b> (`8 AM`, `11 AM`, `2 PM`, `5 PM`) and an <b>Expand Dashboard</b> button to restore View 1.</li>
                 </ul>
             </div>
@@ -1163,7 +1163,7 @@
                     <li><b>Left-click</b> toggles the popover (Main Overview / Mini / Preferences / Auth).</li>
                     <li><b>Right-click</b> pops the context menu: <b>Refresh Now</b> (`⌘R`), <b>Open Dashboard</b>, <b>Open Mini Widget</b>, <b>Preferences…</b> (`⌘,`), separator, <b>Quit DeepSeek Tray</b> (`⌘Q`).</li>
                     <li>Menu items route through the same <code>UsageTracker</code> state as the popover views.</li>
-                    <li>Note: dashboard usage totals (cost/requests/tokens) populate automatically — the SSO sheet's JS interceptor captures the platform's usage API (endpoint + headers) and replays it via <code>DiscoveredDashboardUsageClient</code>; until then stat cards show balance + live session data.</li>
+                    <li>Note: dashboard usage totals populate automatically — the SSO sheet's JS interceptor captures the platform's usage API (endpoint + headers) and replays it via <code>DiscoveredDashboardUsageClient</code>: requests/tokens/daily/key-breakdown from <code>/api/v0/usage/by_api_key/amount</code> (<code>data.biz_data.series[].buckets[]</code>), monthly spend + currency from the billing API <code>/api/v0/usage/cost?month=&amp;year=</code>; until then stat cards show balance + live session data.</li>
                 </ul>
             </div>
             <div class="spec-card">

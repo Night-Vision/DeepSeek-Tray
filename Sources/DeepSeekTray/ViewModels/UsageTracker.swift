@@ -18,21 +18,26 @@ final class UsageTracker: ObservableObject {
 
     private init() {
         snapshot = .empty
-        updateTrayLabelText()
+        updateTrayLabelText(style: preferences.trayDisplayStyle)
 
         if auth.state.apiKeyLinked || auth.state.googleSessionLinked {
             currentView = preferences.compactMiniDefault ? .mini : .dashboard
         }
 
         preferences.$refreshInterval
-            .sink { [weak self] _ in self?.startPolling() }
+            .sink { [weak self] interval in self?.startPolling(interval: interval) }
             .store(in: &cancellables)
 
         preferences.$trayDisplayStyle
-            .sink { [weak self] _ in self?.updateTrayLabelText() }
+            .sink { [weak self] style in self?.updateTrayLabelText(style: style) }
             .store(in: &cancellables)
 
-        startPolling()
+        startPolling(interval: preferences.refreshInterval)
+        // Fetch immediately at launch — the poll timer only fires after the
+        // first refreshInterval elapses, leaving the dashboard blank until then.
+        Task { @MainActor [weak self] in
+            await self?.refresh()
+        }
     }
 
     func show(_ view: PopoverView) {
@@ -58,12 +63,15 @@ final class UsageTracker: ObservableObject {
         // Best-effort dashboard usage via the discovered endpoint (if any).
         // Failure keeps .empty usage defaults and never clobbers balanceError.
         var usage: UsageSnapshot?
+        var cost: (cost: Double, currency: String)?
         if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
             let cookie = KeychainManager.get(account: "sessionCookie")
-            usage = try? await DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: cookie).fetchUsage()
+            let client = DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: cookie)
+            usage = try? await client.fetchUsage()
+            cost = try? await client.fetchCost()
         }
 
-        await MainActor.run { [balance, balanceError, usage] in
+        await MainActor.run { [balance, balanceError, usage, cost] in
             var merged = UsageSnapshot.empty
             merged.balance = balance
             sessionTracker.currentModel = preferences.activeModelProfile
@@ -74,15 +82,18 @@ final class UsageTracker: ObservableObject {
                 merged.totalCost = usage.totalCost
                 merged.totalRequests = usage.totalRequests
                 merged.totalTokens = usage.totalTokens
-                merged.usageCurrency = usage.usageCurrency
                 merged.dailyTotals = usage.dailyTotals
                 merged.hourlyTotalsToday = usage.hourlyTotalsToday
                 merged.keyBreakdown = usage.keyBreakdown
             }
+            if let cost, cost.cost > 0 {
+                merged.totalCost = cost.cost
+                merged.usageCurrency = cost.currency
+            }
 
             snapshot = merged
             lastError = balanceError
-            updateTrayLabelText()
+            updateTrayLabelText(style: preferences.trayDisplayStyle)
             snapshot.lastUpdated = Date()
         }
     }
@@ -107,13 +118,12 @@ final class UsageTracker: ObservableObject {
         return response
     }
 
-    func updateTrayLabelText() {
-        let style = preferences.trayDisplayStyle
+    func updateTrayLabelText(style: TrayDisplayStyle) {
         let prefix = "DS:"
         switch style {
         case .hourly:
-            let tokens = snapshot.hourlyTotalsToday.last?.tokens ?? 0
-            trayLabelText = "\(prefix) \(TokenFormatter.short(tokens))/h"
+            let tokens = snapshot.dailyTotals.last?.totalTokens ?? 0
+            trayLabelText = "\(prefix) \(TokenFormatter.short(tokens))/day"
         case .monthly:
             trayLabelText = "\(prefix) \(TokenFormatter.short(snapshot.totalTokens))"
         case .cost:
@@ -121,10 +131,10 @@ final class UsageTracker: ObservableObject {
         }
     }
 
-    func startPolling() {
+    func startPolling(interval: RefreshInterval) {
         timer?.invalidate()
-        let interval = Double(preferences.refreshInterval.minutes * 60)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let seconds = Double(interval.minutes * 60)
+        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.refresh()
             }

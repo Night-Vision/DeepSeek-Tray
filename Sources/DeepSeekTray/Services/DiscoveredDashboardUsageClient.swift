@@ -56,6 +56,45 @@ struct DiscoveredDashboardUsageClient {
         return try parseUsage(data)
     }
 
+    /// Monthly spend in dollars from the platform's billing API:
+    /// /api/v0/usage/cost?month=M&year=Y — returns biz_data[].total[].usage[]
+    /// with {type, amount} strings + a currency field.
+    func fetchCost() async throws -> (cost: Double, currency: String) {
+        let calendar = Calendar.current
+        let month = calendar.component(.month, from: Date())
+        let year = calendar.component(.year, from: Date())
+        guard let url = URL(string: "https://platform.deepseek.com/api/v0/usage/cost?month=\(month)&year=\(year)") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        for (name, value) in endpoint.headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let root = json as? [String: Any],
+              let dataObj = root["data"] as? [String: Any],
+              let bizData = dataObj["biz_data"] as? [[String: Any]] else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        var total = 0.0
+        var currency = ""
+        for entry in bizData {
+            if currency.isEmpty, let c = entry["currency"] as? String { currency = c }
+            for model in (entry["total"] as? [[String: Any]] ?? []) {
+                for usage in (model["usage"] as? [[String: Any]] ?? []) {
+                    if let amount = usage["amount"] as? String, let value = Double(amount) {
+                        total += value
+                    }
+                }
+            }
+        }
+        return (total, currency)
+    }
+
     // MARK: - Parsing (platform schema: data.biz_data.series[].buckets[])
 
     private func parseUsage(_ data: Data) throws -> UsageSnapshot {
@@ -72,8 +111,9 @@ struct DiscoveredDashboardUsageClient {
         // Totals + raw buckets across every series.
         var totalRequests = 0
         var totalTokens = 0
-        var rawBuckets: [(time: Int, tokens: Int, requests: Int)] = []
+        var rawBuckets: [(time: Int, tokens: Int, requests: Int, model: String)] = []
         for item in series {
+            let model = (item["model"] as? String) ?? "model"
             for bucket in (item["buckets"] as? [[String: Any]] ?? []) {
                 guard let time = (bucket["time"] as? NSNumber)?.intValue,
                       let usage = bucket["usage"] as? [String: Any] else { continue }
@@ -83,7 +123,7 @@ struct DiscoveredDashboardUsageClient {
                     + intVal(usage["PROMPT_CACHE_MISS_TOKEN"])
                 totalRequests += requests
                 totalTokens += tokens
-                rawBuckets.append((time, tokens, requests))
+                rawBuckets.append((time, tokens, requests, model))
             }
         }
         snapshot.totalRequests = totalRequests
@@ -93,14 +133,21 @@ struct DiscoveredDashboardUsageClient {
         // Daily totals — buckets are day-granularity (epoch steps of 86400).
         let calendar = Calendar(identifier: .gregorian)
         var byDay: [Date: (tokens: Int, requests: Int)] = [:]
+        var byDayModel: [Date: [String: Int]] = [:]
         for bucket in rawBuckets {
             let day = calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(bucket.time)))
             let prev = byDay[day, default: (0, 0)]
             byDay[day] = (prev.tokens + bucket.tokens, prev.requests + bucket.requests)
+            byDayModel[day, default: [:]][bucket.model, default: 0] += bucket.tokens
         }
         snapshot.dailyTotals = byDay
             .sorted { $0.key < $1.key }
-            .map { DailyUsage(date: $0.key, totalTokens: $0.value.tokens, totalCost: 0, totalRequests: $0.value.requests, breakdown: []) }
+            .map { day in
+                let breakdown = (byDayModel[day.key] ?? [:])
+                    .sorted { $0.value > $1.value }
+                    .map { UsageBreakdown(category: $0.key, tokens: $0.value, cost: 0) }
+                return DailyUsage(date: day.key, totalTokens: day.value.tokens, totalCost: 0, totalRequests: day.value.requests, breakdown: breakdown)
+            }
 
         // Per-key breakdown, aggregated over all models.
         var byKey: [String: (name: String, tokens: Int)] = [:]

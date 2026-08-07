@@ -23,9 +23,14 @@ final class TrayStatusItemController: NSObject {
         }
 
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        let host = NSHostingController(
             rootView: PopoverRootView().environmentObject(tracker)
         )
+        // Let SwiftUI drive the popover size: preferredContentSize stays in sync with the
+        // root view's ideal size (correct width 220/320 AND natural height) instead of going
+        // stale at the mini layout.
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
 
         // Keep the button title live with the tray label
         tracker.$trayLabelText
@@ -35,11 +40,20 @@ final class TrayStatusItemController: NSObject {
             }
             .store(in: &cancellables)
 
-        // Resize the popover when switching between mini (220) and full (320) views
+        // Resize the popover when switching between mini (220) and full (320) views.
+        // preferredContentSize only refreshes after the new root view re-renders, so read
+        // it on the next runloop turn — no stale fitting sizes, no blank strip.
         tracker.$currentView
             .receive(on: RunLoop.main)
             .sink { [weak self] view in
-                self?.popover.contentSize = view == .mini ? NSSize(width: 220, height: 300) : NSSize(width: 320, height: 520)
+                guard let self, let host = self.popover.contentViewController else { return }
+                DispatchQueue.main.async {
+                    let size = host.preferredContentSize
+                    if size.width > 0 {
+                        host.preferredContentSize = size
+                        self.popover.contentSize = size
+                    }
+                }
             }
             .store(in: &cancellables)
     }
