@@ -34,10 +34,15 @@ struct AuthView: View {
                     .multilineTextAlignment(.center)
             }
 
-            PopoverFooter(left: "API Endpoint: api.deepseek.com", right: "v1.0.0")
+            PopoverFooter(left: "API Endpoint: api.deepseek.com", right: "v\(appVersion)")
         }
         .padding(Metrics.padding)
         .background(Color.dsPopover)
+    }
+
+    /// Version from the packaged Info.plist (release zip), falling back for `swift run`.
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
     }
 
     private var header: some View {

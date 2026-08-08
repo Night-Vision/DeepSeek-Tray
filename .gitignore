@@ -1,27 +1,43 @@
 # Swift Package Manager
 .build/
 .swiftpm/
+Package.resolved
 
-# macOS
+# Packaging & Release Artifacts
+dist/
+*.app/
+*.zip
+
+# macOS System & Metadata
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
 
-# Local app data (SQLite, not source)
+# Local app data & logs
 .freebuff/
+*.log
 
-# Session / agent state
+# Environment & Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Session / Agent / Workspace State
 .reasonix/
 .agents/
+.superpowers/
 reasonix.toml
-
-# Internal agent plans / workspace metadata (not for the repo)
-docs/superpowers/
-docs/Integration-Plan.md
 AGENTS.md
 
-# SDD scratch workspace
-.superpowers/
+# Internal Agent Documentation & Metadata
+docs/superpowers/
+docs/Integration-Plan.md
 
 # Xcode
 *.xcuserstate
 xcuserdata/
 DerivedData/
+*.xcodeproj/
+*.xcworkspace/

@@ -36,6 +36,24 @@ Release build:
 swift build -c release
 ```
 
+## Install (no build required)
+
+Grab the latest `DeepSeekTray-<version>.zip` from [Releases](https://github.com/plugin87/deepseek-tray/releases), unzip, and drag `DeepSeekTray.app` to Applications.
+
+> **Note (Gatekeeper):** the release build is ad-hoc signed (no Apple Developer ID, no sandbox), so macOS will block it the first time. Either:
+> - Right-click `DeepSeekTray.app` → **Open** → **Open**, or
+> - run `xattr -dr com.apple.quarantine "DeepSeekTray.app"` in the folder
+>
+> Then it launches normally from then on. Fully notarized builds need a $99/yr Apple Developer account.
+
+## Screenshots
+
+![App Screenshot](assets/screenshots/screenshot-tray.jpg)
+![Dashboard Screenshot](assets/screenshots/screenshot-expanded-view.jpg)
+![Mini Screenshot](assets/screenshots/screenshot-mimi-view.jpg)
+![SSO Screenshot](assets/screenshots/screenshot-login.jpg)
+
+
 ## Sign-in
 
 Two ways to connect your account:

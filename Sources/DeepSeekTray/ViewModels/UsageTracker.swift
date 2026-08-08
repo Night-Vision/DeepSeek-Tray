@@ -22,6 +22,8 @@ final class UsageTracker: ObservableObject {
 
         if auth.state.apiKeyLinked || auth.state.googleSessionLinked {
             currentView = preferences.compactMiniDefault ? .mini : .dashboard
+        } else {
+            currentView = .auth
         }
 
         preferences.$refreshInterval
@@ -93,6 +95,9 @@ final class UsageTracker: ObservableObject {
 
             snapshot = merged
             lastError = balanceError
+            if !auth.state.apiKeyLinked && !auth.state.googleSessionLinked {
+                currentView = .auth
+            }
             updateTrayLabelText(style: preferences.trayDisplayStyle)
             snapshot.lastUpdated = Date()
         }
