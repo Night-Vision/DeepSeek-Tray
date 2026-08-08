@@ -23,7 +23,7 @@ struct MiniWidgetView: View {
             Button(action: { tracker.show(.dashboard) }) {
                 HStack(spacing: 5) {
                     Text("Expand Dashboard")
-                    Image(systemName: "arrow.right.and.left")
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 10))
                 }
                 .font(.system(size: 11, weight: .semibold))

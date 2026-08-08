@@ -5,14 +5,17 @@ struct PopoverFooter: View {
     let right: String
 
     var body: some View {
-        HStack {
-            Text(left)
-            Spacer()
-            Text(right)
+        VStack(spacing: 8) {
+            Divider()
+                .background(Color.dsBorder)
+            HStack {
+                Text(left)
+                Spacer()
+                Text(right)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.dsTextTertiary)
         }
-        .font(.system(size: 11))
-        .foregroundColor(.dsTextTertiary)
-        .padding(.top, 12)
-        .overlay(Divider().background(Color.dsBorder), alignment: .top)
+        .padding(.top, 10)
     }
 }

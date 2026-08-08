@@ -40,14 +40,6 @@ final class PreferencesStore: ObservableObject {
         didSet { UserDefaults.standard.set(compactMiniDefault, forKey: "compactMiniDefault") }
     }
 
-    @Published var activeModelProfile: ModelProfile = .default {
-        didSet {
-            if let data = try? JSONEncoder().encode(activeModelProfile) {
-                UserDefaults.standard.set(data, forKey: "activeModelProfile")
-            }
-        }
-    }
-
     private init() {
         if let raw = UserDefaults.standard.string(forKey: "refreshInterval"),
            let value = RefreshInterval(rawValue: raw) {
@@ -59,9 +51,5 @@ final class PreferencesStore: ObservableObject {
         }
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         compactMiniDefault = UserDefaults.standard.bool(forKey: "compactMiniDefault")
-        if let data = UserDefaults.standard.data(forKey: "activeModelProfile"),
-           let profile = try? JSONDecoder().decode(ModelProfile.self, from: data) {
-            activeModelProfile = profile
-        }
     }
 }

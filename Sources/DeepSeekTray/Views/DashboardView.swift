@@ -44,16 +44,9 @@ struct DashboardView: View {
     private var statCards: some View {
         let snapshot = tracker.snapshot
         return VStack(spacing: 16) {
-            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: snapshot.usageCurrency)
-            StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests")
-            StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens")
-            if let balance = snapshot.balance {
-                StatCard(title: "BALANCE", value: "\(currencySymbol(balance.currency))\(balance.totalBalance)", sub: balance.currency)
-            }
-
-            if let session = snapshot.liveSession, !session.turns.isEmpty {
-                SessionStatsView(sessionTracker: SessionUsageTracker.shared, model: snapshot.currentModelProfile ?? .default)
-            }
+            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: "\(snapshot.usageCurrency) (this month)")
+            StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests (7d)")
+            StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens (7d)")
         }
     }
 
@@ -66,11 +59,31 @@ struct DashboardView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            PopoverFooter(
-                left: "Updated \(timeAgo(tracker.snapshot.lastUpdated))",
-                right: ""
-            )
+        VStack(spacing: 8) {
+            Divider()
+                .background(Color.dsBorder)
+            HStack {
+                Text("Updated \(timeAgo(tracker.snapshot.lastUpdated))")
+                    .font(.system(size: 11))
+                    .foregroundColor(.dsTextTertiary)
+                Spacer()
+                HStack(spacing: 8) {
+                    Button(action: { tracker.show(.mini) }) {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    }
+                    .buttonStyle(IconButtonStyle())
+
+                    Button(action: { Task { await tracker.refresh() } }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(IconButtonStyle())
+
+                    Button(action: { tracker.show(.preferences) }) {
+                        Image(systemName: "gear")
+                    }
+                    .buttonStyle(IconButtonStyle())
+                }
+            }
             if let err = tracker.lastError {
                 Button(action: copyError) {
                     Text(URLErrorPresenter.shortSummary(for: err))
@@ -96,23 +109,7 @@ struct DashboardView: View {
                 .contentShape(Rectangle())
             }
         }
-        .overlay(
-            HStack(spacing: 8) {
-                Button(action: { tracker.show(.mini) }) {
-                    Image(systemName: "arrow.left.and.right")
-                }
-                .buttonStyle(IconButtonStyle())
-                Button(action: { Task { await tracker.refresh() } }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(IconButtonStyle())
-                Button(action: { tracker.show(.preferences) }) {
-                    Image(systemName: "gear")
-                }
-                .buttonStyle(IconButtonStyle())
-            },
-            alignment: .topTrailing
-        )
+        .padding(.top, 10)
     }
 
     private func copyError() {

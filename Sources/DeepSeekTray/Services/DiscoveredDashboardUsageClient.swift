@@ -134,9 +134,7 @@ struct DiscoveredDashboardUsageClient {
 
         var snapshot = UsageSnapshot.empty
 
-        // Totals + raw buckets across every series.
-        var totalRequests = 0
-        var totalTokens = 0
+        // Raw buckets across every series.
         var rawBuckets: [(time: Int, tokens: Int, requests: Int, model: String)] = []
         for item in series {
             let model = (item["model"] as? String) ?? "model"
@@ -147,14 +145,9 @@ struct DiscoveredDashboardUsageClient {
                 let tokens = intVal(usage["RESPONSE_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_HIT_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_MISS_TOKEN"])
-                totalRequests += requests
-                totalTokens += tokens
                 rawBuckets.append((time, tokens, requests, model))
             }
         }
-        snapshot.totalRequests = totalRequests
-        snapshot.totalTokens = totalTokens
-        // totalCost stays 0: the payload carries no dollar figures.
 
         // Daily totals — buckets are day-granularity (epoch steps of 86400).
         let calendar = Calendar(identifier: .gregorian)
@@ -175,26 +168,37 @@ struct DiscoveredDashboardUsageClient {
                 return DailyUsage(date: day.key, totalTokens: day.value.tokens, totalCost: 0, totalRequests: day.value.requests, breakdown: breakdown)
             }
 
-        // Per-key breakdown, aggregated over all models.
+        // 7-day rolling window totals for StatCards and key breakdown.
+        let last7 = Array(snapshot.dailyTotals.suffix(7))
+        let window7Dates = Set(last7.map { $0.date })
+        snapshot.totalTokens = last7.reduce(0) { $0 + $1.totalTokens }
+        snapshot.totalRequests = last7.reduce(0) { $0 + $1.totalRequests }
+
+        // Per-key breakdown filtered strictly to the 7-day window.
         var byKey: [String: (name: String, tokens: Int)] = [:]
         for item in series {
             guard let apiKey = item["api_key"] as? [String: Any] else { continue }
             let masked = (apiKey["sensitive_id"] as? String) ?? "—"
             let name = (apiKey["name"] as? String) ?? "Key"
-            var tokens = 0
+            var tokens7d = 0
             for bucket in (item["buckets"] as? [[String: Any]] ?? []) {
-                guard let usage = bucket["usage"] as? [String: Any] else { continue }
-                tokens += intVal(usage["RESPONSE_TOKEN"])
+                guard let time = (bucket["time"] as? NSNumber)?.intValue,
+                      let usage = bucket["usage"] as? [String: Any] else { continue }
+                let day = calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(time)))
+                guard window7Dates.contains(day) else { continue }
+
+                tokens7d += intVal(usage["RESPONSE_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_HIT_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_MISS_TOKEN"])
             }
             let prev = byKey[masked, default: (name, 0)]
-            byKey[masked] = (prev.name, prev.tokens + tokens)
+            byKey[masked] = (prev.name, prev.tokens + tokens7d)
         }
-        let total = max(byKey.values.reduce(0) { $0 + $1.tokens }, 1)
+        let windowTotal = max(snapshot.totalTokens, 1)
         snapshot.keyBreakdown = byKey
+            .filter { $0.value.tokens > 0 }
             .sorted { $0.value.tokens > $1.value.tokens }
-            .map { KeyUsage(name: $0.value.name, maskedKeyId: $0.key, tokens: $0.value.tokens, percentage: Double($0.value.tokens) / Double(total) * 100) }
+            .map { KeyUsage(name: $0.value.name, maskedKeyId: $0.key, tokens: $0.value.tokens, percentage: Double($0.value.tokens) / Double(windowTotal) * 100) }
 
         return snapshot
     }

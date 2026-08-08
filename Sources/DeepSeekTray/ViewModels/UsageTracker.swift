@@ -14,13 +14,12 @@ final class UsageTracker: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let preferences = PreferencesStore.shared
     private let auth = AuthManager.shared
-    private let sessionTracker = SessionUsageTracker.shared
 
     private init() {
         snapshot = .empty
         updateTrayLabelText(style: preferences.trayDisplayStyle)
 
-        if auth.state.apiKeyLinked || auth.state.googleSessionLinked {
+        if auth.state.googleSessionLinked {
             currentView = preferences.compactMiniDefault ? .mini : .dashboard
         } else {
             currentView = .auth
@@ -47,38 +46,17 @@ final class UsageTracker: ObservableObject {
     }
 
     func refresh() async {
-        let key = KeychainManager.get(account: "apiKey")
-
-        var balanceError: String?
-        let balance: BalanceInfo?
-        if let key = key, !key.isEmpty {
-            do {
-                balance = try await OfficialBalanceClient(apiKey: key).fetchBalance()
-            } catch {
-                balance = nil
-                balanceError = error.localizedDescription
-            }
-        } else {
-            balance = nil
-        }
-
         // Best-effort dashboard usage via the discovered endpoint (if any).
-        // Failure keeps .empty usage defaults and never clobbers balanceError.
         var usage: UsageSnapshot?
         var cost: (cost: Double, currency: String)?
         if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
-            let cookie = KeychainManager.get(account: "sessionCookie")
-            let client = DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: cookie)
+            let client = DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: nil)
             usage = try? await client.fetchUsage()
             cost = try? await client.fetchCost()
         }
 
-        await MainActor.run { [balance, balanceError, usage, cost] in
+        await MainActor.run { [usage, cost] in
             var merged = UsageSnapshot.empty
-            merged.balance = balance
-            sessionTracker.currentModel = preferences.activeModelProfile
-            merged.liveSession = sessionTracker.currentSession
-            merged.currentModelProfile = preferences.activeModelProfile
 
             if let usage {
                 merged.totalCost = usage.totalCost
@@ -94,33 +72,13 @@ final class UsageTracker: ObservableObject {
             }
 
             snapshot = merged
-            lastError = balanceError
-            if !auth.state.apiKeyLinked && !auth.state.googleSessionLinked {
+            lastError = nil
+            if !auth.state.googleSessionLinked {
                 currentView = .auth
             }
             updateTrayLabelText(style: preferences.trayDisplayStyle)
             snapshot.lastUpdated = Date()
         }
-    }
-
-    // Make a chat completion call and track its usage in real time (Reasonix-style)
-    func sendChat(messages: [ChatMessage], model: String? = nil) async throws -> ChatCompletionResponse {
-        guard let apiKey = KeychainManager.get(account: "apiKey"), !apiKey.isEmpty else {
-            throw URLError(.userAuthenticationRequired)
-        }
-
-        let service = ChatCompletionService(apiKey: apiKey)
-        let selectedModel = model ?? preferences.activeModelProfile.modelId
-        let response = try await service.send(messages: messages, model: selectedModel)
-
-        sessionTracker.recordTurn(from: response)
-        sessionTracker.currentModel = preferences.activeModelProfile
-        var updated = snapshot
-        updated.liveSession = sessionTracker.currentSession
-        updated.currentModelProfile = preferences.activeModelProfile
-        updated.lastUpdated = Date()
-        snapshot = updated
-        return response
     }
 
     func updateTrayLabelText(style: TrayDisplayStyle) {
@@ -130,7 +88,8 @@ final class UsageTracker: ObservableObject {
             let tokens = snapshot.dailyTotals.last?.totalTokens ?? 0
             trayLabelText = "\(prefix) \(TokenFormatter.short(tokens))/day"
         case .monthly:
-            trayLabelText = "\(prefix) \(TokenFormatter.short(snapshot.totalTokens))"
+            let monthlyTokens = snapshot.dailyTotals.reduce(0) { $0 + $1.totalTokens }
+            trayLabelText = "\(prefix) \(TokenFormatter.short(monthlyTokens))"
         case .cost:
             let symbol = currencySymbol(snapshot.usageCurrency)
             trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", snapshot.totalCost))"

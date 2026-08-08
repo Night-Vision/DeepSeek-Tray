@@ -1,16 +1,6 @@
 import Foundation
 
-struct BalanceInfo {
-    let currency: String
-    let totalBalance: String
-    let grantedBalance: String
-    let toppedUpBalance: String
-}
-
 struct UsageSnapshot {
-    // Official API balance
-    var balance: BalanceInfo?
-
     // Dashboard usage totals
     var totalCost: Double
     var totalRequests: Int
@@ -22,12 +12,7 @@ struct UsageSnapshot {
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
 
-    // Live session stats from direct API calls
-    var liveSession: SessionStats?
-    var currentModelProfile: ModelProfile?
-
     static let empty = UsageSnapshot(
-        balance: nil,
         totalCost: 0,
         totalRequests: 0,
         totalTokens: 0,
@@ -35,9 +20,7 @@ struct UsageSnapshot {
         dailyTotals: [],
         hourlyTotalsToday: [],
         keyBreakdown: [],
-        lastUpdated: Date(),
-        liveSession: nil,
-        currentModelProfile: nil
+        lastUpdated: Date()
     )
 
     static let mock: UsageSnapshot = {
@@ -71,20 +54,17 @@ struct UsageSnapshot {
             HourlyUsage(hour: 17, tokens: 8_200)
         ]
         return UsageSnapshot(
-            balance: BalanceInfo(currency: "USD", totalBalance: "1.45", grantedBalance: "0.00", toppedUpBalance: "1.45"),
             totalCost: 1.45,
-            totalRequests: 866,
-            totalTokens: 52_910_584,
+            totalRequests: 11_032,
+            totalTokens: 1_655_000,
             usageCurrency: "USD",
             dailyTotals: dailyTotals,
             hourlyTotalsToday: hourlyTotalsToday,
             keyBreakdown: [
-                KeyUsage(name: "Prod-Server-App", maskedKeyId: "sk-8f2a...991c", tokens: 37_000_000, percentage: 69.9),
-                KeyUsage(name: "Local-Dev-CLI", maskedKeyId: "sk-4b19...00ab", tokens: 15_910_584, percentage: 30.1)
+                KeyUsage(name: "Prod-Server-App", maskedKeyId: "sk-8f2a...991c", tokens: 1_156_845, percentage: 69.9),
+                KeyUsage(name: "Local-Dev-CLI", maskedKeyId: "sk-4b19...00ab", tokens: 498_155, percentage: 30.1)
             ],
-            lastUpdated: Date(),
-            liveSession: nil,
-            currentModelProfile: nil
+            lastUpdated: Date()
         )
     }()
 }

@@ -1,16 +1,15 @@
 # DeepSeek Tray
 
-A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://platform.deepseek.com) API balance and token usage — right from the menu bar.
+A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://platform.deepseek.com) platform usage and cost — right from the menu bar.
 
 ![Platform](https://img.shields.io/badge/macOS-14%2B-black) ![License](https://img.shields.io/badge/License-MIT-blue)
 
 ## Features
 
-- **Balance monitoring** — live API-key balance via the official `GET /user/balance` endpoint
-- **Live session tracking** — real-time token/cost stats from chat-completion responses (`sendChat`), with a context-window usage bar
+- **Usage & cost monitoring** — daily token usage, API request counts, per-model 7-day charts, and monthly spend via the billing API (`/api/v0/usage/cost`)
 - **Tray display modes** — today's tokens, monthly total, or estimated cost right in the menu bar label
 - **Right-click tray menu** — Refresh Now, Open Dashboard, Open Mini Widget, Preferences…, Quit
-- **Flexible sign-in** — API key or Google SSO (standalone WKWebView window), secrets stored in macOS Keychain
+- **Two sign-in options** — Portal Email & Password or Google SSO (standalone WKWebView window); the session JWT is stored in macOS Keychain
 - **Automatic usage discovery** — the SSO sheet captures the platform's usage API (endpoint, headers); cost/tokens/charts populate from the replay, including monthly spend via the billing API (`/api/v0/usage/cost`)
 - **Mini widget & charts** — compact popover widget and a 7-day stacked usage chart (per-model bars), both driven by the platform's daily-granularity data (last 7 days)
 - **Dashboard ⇄ mini toggle** — sideways-arrow buttons in both corners: collapse the full dashboard to the mini widget (`→←`) and expand back (`←→`)
@@ -21,7 +20,7 @@ A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://pl
 
 - macOS 14.0+
 - Swift 5.10 (Swift Package Manager)
-- A DeepSeek platform account (API key or dashboard session)
+- A DeepSeek platform account (portal credentials or Google SSO)
 
 ## Build & Run
 
@@ -48,34 +47,34 @@ Grab the latest `DeepSeekTray-<version>.zip` from [Releases](https://github.com/
 
 ## Screenshots
 
-![App Screenshot](assets/screenshots/screenshot-tray.jpg)
-![Dashboard Screenshot](assets/screenshots/screenshot-expanded-view.jpg)
-![Mini Screenshot](assets/screenshots/screenshot-mimi-view.jpg)
-![SSO Screenshot](assets/screenshots/screenshot-login.jpg)
+![App Screenshot](assets/screenshots/Screenshot-tray.jpg)
+![Dashboard Screenshot](assets/screenshots/Screenshot-expanded-view.jpg)
+![Mini Screenshot](assets/screenshots/Screenshot-mimi-view.jpg)
+![SSO Screenshot](assets/screenshots/Screenshot-login.jpg)
 
 
 ## Sign-in
 
 Two ways to connect your account:
 
-1. **API key** — paste a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys); balance is fetched from the official API. This is the primary data source.
-2. **Google SSO** — sign in through a standalone WKWebView window; the window intercepts the platform's usage API traffic and captures it (endpoint + auth headers) so cost/tokens/charts populate automatically.
+1. **Portal Email & Password** — sign in directly with your DeepSeek platform credentials in-app; background worker pre-fills and authenticates seamless session capture.
+2. **Google SSO** — sign in with your Google account through a standalone WKWebView window; the window intercepts the platform's usage API traffic and captures auth headers automatically.
 
 ### How SSO works (exact flow)
 
-1. "Sign in with Google" opens a **standalone** WKWebView window (never a sheet on the tray popover, which would close on resign-key).
+1. Sign-in initializes a background or standalone WKWebView window.
 2. A JS interceptor is injected at `documentStart` (all frames) that shadows `fetch`/`XMLHttpRequest` and forwards `url, method, status, body (≤30KB), headers` to Swift.
-3. You complete Google OAuth; the platform's `/authorized` callback loads.
-4. **Auth is header-based, not cookie-based**: the platform SPA keeps a Bearer JWT client-side and sends it per-request (`authorization` + `x-client-*` headers). No session cookie ever exists — this is why cookie-based capture could never work.
+3. You complete authentication on `platform.deepseek.com`.
+4. **Auth is header-based**: the platform SPA sends a Bearer JWT per-request (`authorization` + `x-client-*` headers).
 5. The SPA navigates to the Usage page and fires the usage API; the interceptor catches it and Swift validates the response is usage-shaped JSON.
 6. The sheet stores `ds_discovered_usage_endpoint` (`url`, `method`, `headers`, `discoveredAt` — never bodies) in UserDefaults, then **auto-closes**.
-7. `UsageTracker.refresh()` replays that endpoint (relative URLs resolved against `https://platform.deepseek.com`, captured headers as auth) alongside the balance fetch; failures fall back to empty defaults without touching the balance error.
+7. `UsageTracker.refresh()` replays that endpoint (relative URLs resolved against `https://platform.deepseek.com`, captured headers as auth); failures fall back to empty defaults.
 
-Credentials live in the macOS Keychain under service `com.deepseek.tray` — never in plain files: the API key under account `apiKey`, the SSO Bearer JWT under `googleToken` (restored at launch, so the session survives restarts), and the legacy manual-paste session cookie under `sessionCookie`. The captured usage endpoint config (URL + headers, never bodies) is stored in UserDefaults as `ds_discovered_usage_endpoint`.
+Credentials live in the macOS Keychain under service `com.deepseek.tray` — never in plain files: the SSO Bearer JWT is stored under `googleToken` (restored at launch, so the session survives restarts). The captured usage endpoint config (URL + headers, never bodies) is stored in UserDefaults as `ds_discovered_usage_endpoint`.
 
 ## Security
 
-- API keys and session cookies are stored in the macOS Keychain (`kSecClassGenericPassword`, accessible after first unlock)
+- The SSO Bearer JWT is stored in the macOS Keychain (`kSecClassGenericPassword`, accessible after first unlock) under `googleToken` — restored at launch, so the session survives restarts
 - No telemetry, no network calls beyond DeepSeek's own endpoints
 
 ## License
@@ -84,4 +83,4 @@ Credentials live in the macOS Keychain under service `com.deepseek.tray` — nev
 
 ---
 
-> **Note:** dashboard usage totals (requests/tokens per day + key breakdown) populate automatically once the SSO sheet captures the platform's usage endpoint; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures). Until then the stat cards reflect balance + live session data.
+> **Note:** dashboard usage StatCards (requests, tokens, and API key breakdown) aggregate the rolling **last 7 days** to align with the 7-Day Usage Trend chart; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures).

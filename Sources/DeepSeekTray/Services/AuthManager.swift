@@ -9,28 +9,11 @@ final class AuthManager: ObservableObject {
     @Published var state = AuthState()
 
     private init() {
-        state.apiKeyLinked = KeychainManager.get(account: "apiKey") != nil
-        // Header-based SSO persists the Bearer JWT under googleToken;
-        // sessionCookie is the legacy manual-paste path.
+        // Single-pass legacy purge: clear obsolete Keychain items from older versions
+        KeychainManager.delete(account: "apiKey")
+        KeychainManager.delete(account: "sessionCookie")
+
         state.googleSessionLinked = KeychainManager.get(account: "googleToken") != nil
-            || KeychainManager.get(account: "sessionCookie") != nil
-    }
-
-    func signInWithAPIKey(_ key: String, label: String) async -> Bool {
-        guard !key.isEmpty,
-              (try? await OfficialBalanceClient(apiKey: key).fetchBalance()) != nil else {
-            return false
-        }
-        guard KeychainManager.save(account: "apiKey", value: key) else { return false }
-        state.apiKeyLinked = true
-        return true
-    }
-
-    func saveSessionCookie(_ cookie: String) -> Bool {
-        guard !cookie.isEmpty else { return false }
-        let ok = KeychainManager.save(account: "sessionCookie", value: cookie)
-        if ok { state.googleSessionLinked = true }
-        return ok
     }
 
     func openDeepSeekLoginInBrowser() {
@@ -46,30 +29,29 @@ final class AuthManager: ObservableObject {
         let sheet = WebSSOSheet(siteURL: url)
         sheet.start { [weak self] ok in
             if ok {
-                // The fresh JWT is saved to Keychain by WebSSOSheet during capture.
                 self?.state.googleSessionLinked = true
             }
             completion(ok)
         }
     }
 
-    func signOut(method: String) {
-        switch method {
-        case "apiKey":
-            KeychainManager.delete(account: "apiKey")
-            state.apiKeyLinked = false
-        case "sessionCookie":
-            KeychainManager.delete(account: "sessionCookie")
-            KeychainManager.delete(account: "googleToken")
-            // The endpoint config is useless without the JWT; drop it too.
-            UserDefaults.standard.removeObject(forKey: "ds_discovered_usage_endpoint")
-            state.googleSessionLinked = false
-        default:
-            KeychainManager.delete(account: "apiKey")
-            KeychainManager.delete(account: "sessionCookie")
-            KeychainManager.delete(account: "googleToken")
-            UserDefaults.standard.removeObject(forKey: "ds_discovered_usage_endpoint")
-            state = AuthState()
+    func beginDirectSSO(email: String, password: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://platform.deepseek.com/sign_in") else {
+            completion(false)
+            return
         }
+        let sheet = WebSSOSheet(siteURL: url, initialEmail: email, initialPassword: password, isHeadless: true)
+        sheet.start { [weak self] ok in
+            if ok {
+                self?.state.googleSessionLinked = true
+            }
+            completion(ok)
+        }
+    }
+
+    func signOut() {
+        KeychainManager.delete(account: "googleToken")
+        UserDefaults.standard.removeObject(forKey: "ds_discovered_usage_endpoint")
+        state.googleSessionLinked = false
     }
 }

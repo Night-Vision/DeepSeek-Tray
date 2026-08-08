@@ -13,19 +13,10 @@ struct PreferencesView: View {
                 RefreshIntervalRow()
                 TrayStyleRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Usage Endpoint Override")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.dsTextPrimary)
-                    TextField("https://platform.deepseek.com/...", text: UserDefaults.standard.stringBinding(forKey: "ds_usage_endpoint"))
-                        .darkTextField()
-                }
-                .padding(.vertical, 9)
             }
 
             Button(action: purge) {
-                Text("Purge Stored Key from Keychain")
+                Text("Sign Out & Clear Session Data")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(9)
@@ -65,7 +56,7 @@ struct PreferencesView: View {
     }
 
     private func purge() {
-        AuthManager.shared.signOut(method: "all")
+        AuthManager.shared.signOut()
         tracker.currentView = .auth
     }
 }

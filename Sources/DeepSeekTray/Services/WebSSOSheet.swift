@@ -6,6 +6,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
     private let webView: WKWebView
     private var contentController: WKUserContentController?
     private let siteURL: URL
+    private let initialEmail: String?
+    private let initialPassword: String?
+    private var isHeadless: Bool
+    private var hasPrefilled = false
     private var pendingCompletion: ((Bool) -> Void)?
     private var saved = false
     private var pendingDiscovery = false
@@ -71,8 +75,11 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
     })();
     """
 
-    init(siteURL: URL) {
+    init(siteURL: URL, initialEmail: String? = nil, initialPassword: String? = nil, isHeadless: Bool = false) {
         self.siteURL = siteURL
+        self.initialEmail = initialEmail
+        self.initialPassword = initialPassword
+        self.isHeadless = isHeadless
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
@@ -104,6 +111,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
         self.contentController = userContentController
         userContentController.add(self, contentWorld: .page, name: "networkInterceptor")
 
+        if isHeadless {
+            self.alphaValue = 0
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(windowWillClose(_:)),
@@ -122,14 +133,53 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
         self.pendingCompletion = completion
         let request = URLRequest(url: siteURL)
         webView.load(request)
-        self.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if !isHeadless {
+            self.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
+                guard let self, !self.saved else { return }
+                print("[WebSSOSheet] Headless sign-in timed out after 15s")
+                self.handleDismiss(success: false)
+            }
+        }
     }
 
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("[WebSSOSheet] didFinish: \(webView.url?.absoluteString ?? "?") title: \(webView.title ?? "?")")
+
+        if let url = webView.url?.absoluteString, url.contains("/sign_in"),
+           let email = initialEmail, let password = initialPassword,
+           !email.isEmpty, !password.isEmpty, !hasPrefilled {
+            hasPrefilled = true
+            let escapedEmail = (try? String(data: JSONEncoder().encode(email), encoding: .utf8)) ?? "\"\""
+            let escapedPassword = (try? String(data: JSONEncoder().encode(password), encoding: .utf8)) ?? "\"\""
+            let script = """
+            (function() {
+                const e = document.querySelector('input[type="email"], input[name="email"], input[type="text"], input[autocomplete="username"]');
+                const p = document.querySelector('input[type="password"], input[name="password"], input[autocomplete="current-password"]');
+                if (e && p) {
+                    e.value = \(escapedEmail);
+                    p.value = \(escapedPassword);
+                    e.dispatchEvent(new Event('input', { bubbles: true }));
+                    p.dispatchEvent(new Event('input', { bubbles: true }));
+                    e.dispatchEvent(new Event('change', { bubbles: true }));
+                    p.dispatchEvent(new Event('change', { bubbles: true }));
+                    setTimeout(() => {
+                        const btn = document.querySelector('button[type="submit"], button.ds-button--primary, form button');
+                        if (btn) btn.click();
+                    }, 200);
+                }
+            })();
+            """
+            webView.evaluateJavaScript(script) { [weak self] _, _ in
+                if self?.isHeadless == true {
+                    self?.scheduleCaptchaCheck()
+                }
+            }
+        }
 
         // Only evaluate cookies on the DeepSeek platform itself, never on Google
         // sign-in intermediates. Skip the pre-login /sign_in page.
@@ -156,6 +206,23 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
                 }
                 self.evaluateCookies()
                 self.schedulePageStateProbe()
+            }
+        }
+    }
+
+    private func scheduleCaptchaCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self, self.isHeadless, !self.saved else { return }
+            self.webView.evaluateJavaScript("""
+                !!document.querySelector('iframe[src*="captcha"], iframe[src*="cloudflare"], div[class*="captcha"]')
+            """) { [weak self] result, _ in
+                if let hasCaptcha = result as? Bool, hasCaptcha {
+                    print("[WebSSOSheet] CAPTCHA challenge detected — revealing login window for user completion")
+                    self?.isHeadless = false
+                    self?.alphaValue = 1.0
+                    self?.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         }
     }
@@ -223,8 +290,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         guard !header.isEmpty else { return }
-        let ok = KeychainManager.save(account: "sessionCookie", value: header)
-        if ok && !pendingDiscovery {
+        if !pendingDiscovery {
             // Already have a working endpoint from a previous discovery? Done.
             if DiscoveredDashboardUsageClient.loadEndpoint() != nil {
                 handleDismiss(success: true)

@@ -3,13 +3,13 @@ import SwiftUI
 struct AuthView: View {
     @EnvironmentObject var tracker: UsageTracker
     @ObservedObject private var auth = AuthManager.shared
-    @State private var apiKey = ""
-    @State private var label = ""
-    @State private var cookie = ""
+    @State private var portalEmail = ""
+    @State private var portalPassword = ""
+    @State private var isAuthenticating = false
     @State private var message: String?
 
     private var isLinked: Bool {
-        auth.state.apiKeyLinked || auth.state.googleSessionLinked
+        auth.state.googleSessionLinked
     }
 
     var body: some View {
@@ -17,7 +17,7 @@ struct AuthView: View {
             header
 
             VStack(spacing: 14) {
-                apiKeySection
+                portalSection
 
                 Divider()
                     .background(Color.dsBorder)
@@ -34,7 +34,7 @@ struct AuthView: View {
                     .multilineTextAlignment(.center)
             }
 
-            PopoverFooter(left: "API Endpoint: api.deepseek.com", right: "v\(appVersion)")
+            PopoverFooter(left: "API Endpoint: platform.deepseek.com", right: "v\(appVersion)")
         }
         .padding(Metrics.padding)
         .background(Color.dsPopover)
@@ -62,28 +62,34 @@ struct AuthView: View {
         .overlay(Divider().background(Color.dsBorder), alignment: .bottom)
     }
 
-    private var apiKeySection: some View {
+    private var portalSection: some View {
         VStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("DeepSeek API Key")
+                Text("Portal Email Address")
                     .font(.system(size: 11))
                     .foregroundColor(.dsTextSecondary)
-                SecureField("sk-...", text: $apiKey)
+                TextField("name@example.com", text: $portalEmail)
                     .darkTextField()
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Key Label / Friendly Name")
+                Text("Portal Password")
                     .font(.system(size: 11))
                     .foregroundColor(.dsTextSecondary)
-                TextField("e.g. My Mac", text: $label)
+                SecureField("••••••••", text: $portalPassword)
                     .darkTextField()
             }
 
-            Button(action: saveAPIKey) {
+            Button(action: startDirectPortalSSO) {
                 HStack(spacing: 8) {
-                    Image(systemName: "key.fill")
-                    Text("Save Key to Keychain")
+                    if isAuthenticating {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: "person.badge.key.fill")
+                    }
+                    Text(isAuthenticating ? "Authenticating..." : "Sign in to Portal")
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .frame(maxWidth: .infinity)
@@ -92,6 +98,7 @@ struct AuthView: View {
                 .foregroundColor(.white)
                 .cornerRadius(Metrics.radiusInner)
             }
+            .disabled(portalEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || portalPassword.isEmpty || isAuthenticating)
             .buttonStyle(.plain)
         }
     }
@@ -111,61 +118,7 @@ struct AuthView: View {
                 .cornerRadius(Metrics.radiusInner)
             }
             .buttonStyle(.plain)
-
-            Text("Or paste the Cookie header (DevTools → Network → any request) below:")
-                .font(.system(size: 10))
-                .foregroundColor(.dsTextTertiary)
-                .multilineTextAlignment(.center)
-                .lineLimit(nil)
-
-            Button(action: openBrowser) {
-                Text("Open platform.deepseek.com in browser →")
-                    .font(.system(size: 10))
-                    .foregroundColor(.dsTextTertiary)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Paste Cookie header from DevTools (reliable)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.dsTextSecondary)
-                TextField("session=...; token=...", text: $cookie)
-                    .darkTextField()
-            }
-
-            Button(action: saveCookie) {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.on.doc")
-                    Text("Store Session Cookie")
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(9)
-                .background(Color.dsPopoverSubtle)
-                .foregroundColor(.dsTextPrimary)
-                .overlay(RoundedRectangle(cornerRadius: Metrics.radiusInner).stroke(Color.dsBorder, lineWidth: 1))
-                .cornerRadius(Metrics.radiusInner)
-            }
-            .buttonStyle(.plain)
         }
-    }
-
-    private func saveAPIKey() {
-        Task {
-            let ok = await AuthManager.shared.signInWithAPIKey(apiKey, label: label.isEmpty ? "Unnamed" : label)
-            message = ok ? "API key saved." : "Invalid API key — DeepSeek rejected it."
-            if ok { tracker.currentView = .dashboard }
-        }
-    }
-
-    private func saveCookie() {
-        let ok = AuthManager.shared.saveSessionCookie(cookie)
-        message = ok ? "Session cookie saved." : "Failed to save cookie."
-        if ok { tracker.currentView = .dashboard }
-    }
-
-    private func openBrowser() {
-        AuthManager.shared.openDeepSeekLoginInBrowser()
     }
 
     private func startWebSSO() {
@@ -175,7 +128,29 @@ struct AuthView: View {
                 message = "Signed in to DeepSeek."
                 Task { await tracker.refresh() }
             } else {
-                message = "Sign-in was cancelled. Paste your Cookie header below instead."
+                message = "Sign-in was cancelled."
+            }
+        }
+    }
+
+    private func startDirectPortalSSO() {
+        let cleanEmail = portalEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPassword = portalPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanEmail.isEmpty, !cleanPassword.isEmpty else {
+            message = "Please enter both email and password."
+            return
+        }
+
+        isAuthenticating = true
+        message = nil
+        AuthManager.shared.beginDirectSSO(email: cleanEmail, password: cleanPassword) { ok in
+            isAuthenticating = false
+            if ok {
+                tracker.currentView = .dashboard
+                message = "Signed in to DeepSeek."
+                Task { await tracker.refresh() }
+            } else {
+                message = "Sign-in failed or was cancelled."
             }
         }
     }
