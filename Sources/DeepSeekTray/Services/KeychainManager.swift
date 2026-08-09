@@ -7,13 +7,23 @@ struct KeychainManager {
     static func save(account: String, value: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
         delete(account: account)
-        let query: [String: Any] = [
+
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
+
+        // Keychain ACL: nil trusted application list permits ad-hoc dev builds (whose
+        // cdhash shifts on every rebuild) to access the token without repeated macOS prompts.
+        // Upgrade to app-scoped ACL when signing with Apple Developer ID.
+        var access: SecAccess?
+        if SecAccessCreate("DeepSeek Tray" as CFString, nil, &access) == errSecSuccess, let access {
+            query[kSecAttrAccess as String] = access
+        }
+
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 

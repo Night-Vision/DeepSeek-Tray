@@ -9,10 +9,10 @@ APP_NAME="DeepSeekTray"
 BUILD_DIR=".build/release"
 DIST="dist"
 
-echo "==> Building release binary (swift build -c release)..."
-swift build -c release --disable-sandbox
+echo "==> Building release binary for arm64 (Apple Silicon)..."
+swift build -c release --triple arm64-apple-macosx --disable-sandbox
 
-BIN="$BUILD_DIR/$APP_NAME"
+BIN=".build/arm64-apple-macosx/release/$APP_NAME"
 [ -x "$BIN" ] || { echo "missing binary: $BIN"; exit 1; }
 
 STAGE="$DIST/$APP_NAME.app"

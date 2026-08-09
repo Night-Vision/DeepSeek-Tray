@@ -23,7 +23,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
                 window.webkit.messageHandlers.networkInterceptor.postMessage(payload);
             }
         };
-        const cap = (s) => (s || '').slice(0, 30000);
 
         const origFetch = window.fetch;
         window.fetch = async function(resource, init) {
@@ -35,14 +34,12 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
             } catch (e) {}
             try {
                 const response = await origFetch.apply(this, arguments);
-                try {
-                    const clone = response.clone();
-                    SEND({ type: 'fetch', url, method, status: response.status,
-                           headers, body: cap(await clone.text()) });
-                } catch (e) {}
+                // Headers only — never read bodies: auth is a Bearer JWT in the
+                // request headers, and we don't want prompt/response content in JS memory.
+                SEND({ type: 'fetch', url, method, status: response.status, headers });
                 return response;
             } catch (err) {
-                SEND({ type: 'fetch', url, method, status: 0, headers, body: '' });
+                SEND({ type: 'fetch', url, method, status: 0, headers });
                 throw err;
             }
         };
@@ -63,8 +60,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         XMLHttpRequest.prototype.send = function(body) {
             this.addEventListener('load', function() {
                 SEND({ type: 'xhr', url: this._dsUrl || '', method: this._dsMethod || 'GET',
-                       status: this.status, headers: this._dsHeaders || {},
-                       body: cap(this.responseText) });
+                       status: this.status, headers: this._dsHeaders || {} });
             });
             return origSend.apply(this, arguments);
         };
@@ -239,18 +235,16 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
               let dict = message.body as? [String: Any],
               let url = dict["url"] as? String else { return }
 
-        let patterns = ["usage", "stat", "daily", "tokens", "billing", "cost"]
-        guard patterns.contains(where: { url.lowercased().contains($0) }),
-              let body = dict["body"] as? String,
-              hasUsageShape(body) else { return }
+        // Header-only detection: auth is a Bearer JWT, and the usage endpoint is
+        // the /api/v0/usage/* schema. The interceptor never reads bodies, so the
+        // gate is the URL pattern + an Authorization header present.
+        let lower = url.lowercased()
+        guard lower.contains("/api/v0/usage/"),
+              !lower.contains("cost"), !lower.contains("billing") else { return }
 
         let headers = (dict["headers"] as? [String: Any])?
             .compactMapValues { $0 as? String } ?? [:]
-
-        // The platform fires multiple usage-shaped calls; prefer the known-good
-        // "amount" schema and ignore billing/cost variants (different shape).
-        let lower = url.lowercased()
-        if lower.contains("cost") || lower.contains("billing") { return }
+        guard headers.keys.contains(where: { $0.lowercased() == "authorization" }) else { return }
 
         // Persist the fresh Bearer JWT NOW, from the raw capture — the sanitized
         // endpoint saved below no longer carries it (security fix).
@@ -269,23 +263,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // Endpoint captured = auth succeeded (auth rides in the captured request
         // headers, not a cookie). Close the sheet and let the app poll it.
         handleDismiss(success: true)
-    }
-
-    private func hasUsageShape(_ body: String) -> Bool {        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) else { return false }
-        return containsUsageKey(json)
-    }
-
-    private func containsUsageKey(_ value: Any) -> Bool {
-        let usageKeys = ["date", "tokens", "cost", "requests", "usage", "daily", "hourly"]
-        if let dict = value as? [String: Any] {
-            if dict.keys.contains(where: { usageKeys.contains($0.lowercased()) }) { return true }
-            return dict.values.contains { containsUsageKey($0) }
-        }
-        if let array = value as? [Any] {
-            return array.contains { containsUsageKey($0) }
-        }
-        return false
     }
 
     @objc private func windowWillClose(_ note: Notification) {

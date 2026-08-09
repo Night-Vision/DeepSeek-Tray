@@ -8,7 +8,6 @@ struct UsageSnapshot {
     var usageCurrency: String
 
     var dailyTotals: [DailyUsage]
-    var hourlyTotalsToday: [HourlyUsage]
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
 
@@ -18,7 +17,6 @@ struct UsageSnapshot {
         totalTokens: 0,
         usageCurrency: "USD",
         dailyTotals: [],
-        hourlyTotalsToday: [],
         keyBreakdown: [],
         lastUpdated: Date()
     )
@@ -41,25 +39,12 @@ struct UsageSnapshot {
                 ]
             )
         }
-        let hourlyTotalsToday = [
-            HourlyUsage(hour: 8, tokens: 1_200),
-            HourlyUsage(hour: 9, tokens: 3_100),
-            HourlyUsage(hour: 10, tokens: 5_000),
-            HourlyUsage(hour: 11, tokens: 3_800),
-            HourlyUsage(hour: 12, tokens: 6_900),
-            HourlyUsage(hour: 13, tokens: 4_200),
-            HourlyUsage(hour: 14, tokens: 12_400),
-            HourlyUsage(hour: 15, tokens: 5_600),
-            HourlyUsage(hour: 16, tokens: 2_100),
-            HourlyUsage(hour: 17, tokens: 8_200)
-        ]
         return UsageSnapshot(
             totalCost: 1.45,
             totalRequests: 11_032,
             totalTokens: 1_655_000,
             usageCurrency: "USD",
             dailyTotals: dailyTotals,
-            hourlyTotalsToday: hourlyTotalsToday,
             keyBreakdown: [
                 KeyUsage(name: "Prod-Server-App", maskedKeyId: "sk-8f2a...991c", tokens: 1_156_845, percentage: 69.9),
                 KeyUsage(name: "Local-Dev-CLI", maskedKeyId: "sk-4b19...00ab", tokens: 498_155, percentage: 30.1)
@@ -76,12 +61,6 @@ struct DailyUsage: Identifiable {
     let totalCost: Double
     let totalRequests: Int
     let breakdown: [UsageBreakdown]
-}
-
-struct HourlyUsage: Identifiable {
-    let id = UUID()
-    let hour: Int
-    let tokens: Int
 }
 
 struct KeyUsage: Identifiable {

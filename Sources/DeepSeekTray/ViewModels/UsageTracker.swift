@@ -72,7 +72,6 @@ final class UsageTracker: ObservableObject {
                 merged.totalRequests = usage.totalRequests
                 merged.totalTokens = usage.totalTokens
                 merged.dailyTotals = usage.dailyTotals
-                merged.hourlyTotalsToday = usage.hourlyTotalsToday
                 merged.keyBreakdown = usage.keyBreakdown
             }
             if let cost, cost.cost > 0 {
