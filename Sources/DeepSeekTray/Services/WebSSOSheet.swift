@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler, WKHTTPCookieStoreObserver {
+final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler {
     private let webView: WKWebView
     private var contentController: WKUserContentController?
     private let siteURL: URL
@@ -12,10 +12,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
     private var hasPrefilled = false
     private var pendingCompletion: ((Bool) -> Void)?
     private var saved = false
-    private var pendingDiscovery = false
-    private var observingCookies = false
-    private var baselineDeepSeekCookies: [String: String] = [:]
-    private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
 
     // Intercepts fetch/XHR on the platform site and forwards usage-shaped traffic to Swift.
     private static let interceptorScript = """
@@ -125,7 +121,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-        if observingCookies { cookieStore.remove(self) }
         contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
     }
 
@@ -181,33 +176,13 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
             }
         }
 
-        // Only evaluate cookies on the DeepSeek platform itself, never on Google
-        // sign-in intermediates. Skip the pre-login /sign_in page.
+        // Diagnostics only: on any post-login platform page, dump the SPA state
+        // 10s later so stuck spinner/error screens are visible in the log.
         guard let host = webView.url?.host,
               host == "platform.deepseek.com" || host.hasSuffix(".deepseek.com"),
               let url = webView.url?.absoluteString,
               !url.contains("/sign_in") else { return }
-
-        // The OAuth callback page (/authorized) loads before the session cookie
-        // exists; it's set by the SPA's follow-up requests, which never fire
-        // didFinish. Snapshot the pre-login deepseek.com cookies, then let
-        // WKHTTPCookieStoreObserver fire on any cookie change — no polling, no
-        // time cap.
-        cookieStore.getAllCookies { [weak self] all in
-            let snapshot = Dictionary(uniqueKeysWithValues: all
-                .filter { $0.domain == "deepseek.com" || $0.domain.hasSuffix(".deepseek.com") }
-                .map { ($0.name, $0.value) })
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.baselineDeepSeekCookies = snapshot
-                if !self.observingCookies {
-                    self.cookieStore.add(self)
-                    self.observingCookies = true
-                }
-                self.evaluateCookies()
-                self.schedulePageStateProbe()
-            }
-        }
+        schedulePageStateProbe()
     }
 
     private func scheduleCaptchaCheck() {
@@ -246,13 +221,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
         }
     }
 
-    // MARK: - WKHTTPCookieStoreObserver
-
-    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        print("[WebSSOSheet] cookiesDidChange fired")
-        DispatchQueue.main.async { [weak self] in self?.evaluateCookies() }
-    }
-
     // MARK: - WKNavigationDelegate failures
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -261,45 +229,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         print("[WebSSOSheet] didFailProvisional: \(error.localizedDescription)")
-    }
-
-    private func evaluateCookies() {
-        guard !saved else { return }
-        cookieStore.getAllCookies { [weak self] cookies in
-            DispatchQueue.main.async { self?.captureAndStore(cookies) }
-        }
-    }
-
-    private func captureAndStore(_ cookies: [HTTPCookie]) {
-        guard !saved else { return }
-
-        // Evidence log: which cookies exist on which page (names only, no values).
-        print("[WebSSOSheet] page: \(webView.url?.absoluteString ?? "?")")
-        print("[WebSSOSheet] cookies: \(cookies.map(\.name).sorted())")
-
-        // Gate: capture when any deepseek.com cookie changed vs the pre-login
-        // snapshot — a new name OR a changed value (the session cookie may reuse
-        // an existing name, e.g. smidV2). Values compared in memory only.
-        guard cookies.contains(where: { cookie in
-            guard cookie.domain == "deepseek.com" || cookie.domain.hasSuffix(".deepseek.com") else { return false }
-            return baselineDeepSeekCookies[cookie.name] != cookie.value
-        }) else { return }
-
-        let header = cookies
-            .filter { $0.domain == "deepseek.com" || $0.domain.hasSuffix(".deepseek.com") }
-            .map { "\($0.name)=\($0.value)" }
-            .joined(separator: "; ")
-        guard !header.isEmpty else { return }
-        if !pendingDiscovery {
-            // Already have a working endpoint from a previous discovery? Done.
-            if DiscoveredDashboardUsageClient.loadEndpoint() != nil {
-                handleDismiss(success: true)
-            } else {
-                // Otherwise drive the dashboard so the usage API fires under the interceptor.
-                pendingDiscovery = true
-                webView.load(URLRequest(url: URL(string: "https://platform.deepseek.com/dashboard")!))
-            }
-        }
     }
 
     // MARK: - WKScriptMessageHandler
@@ -359,16 +288,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
         return false
     }
 
-    private func finishDiscovery() {
-        guard pendingDiscovery else { return }
-        pendingDiscovery = false
-        // Close only on success — on failure keep the window open so the user can
-        // navigate the dashboard manually; they close it themselves.
-        if DiscoveredDashboardUsageClient.loadEndpoint() != nil {
-            handleDismiss(success: true)
-        }
-    }
-
     @objc private func windowWillClose(_ note: Notification) {
         handleDismiss(success: false)
     }
@@ -376,10 +295,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler,
     private func handleDismiss(success: Bool) {
         guard !saved else { return }
         saved = true
-        if observingCookies {
-            cookieStore.remove(self)
-            observingCookies = false
-        }
         let completion = pendingCompletion
         pendingCompletion = nil
 

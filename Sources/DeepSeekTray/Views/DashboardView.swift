@@ -177,11 +177,22 @@ enum Formatter {
 }
 
 struct IconButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundColor(.dsTextSecondary)
+            .foregroundColor(isHovered ? .dsTextPrimary : .dsTextSecondary)
             .frame(width: 22, height: 22)
-            .background(configuration.isPressed ? Color.white.opacity(0.1) : Color.clear)
+            .background(
+                configuration.isPressed
+                    ? Color.white.opacity(0.10)
+                    : (isHovered ? Color.white.opacity(0.12) : Color.clear)
+            )
             .cornerRadius(4)
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isHovered = hovering
+                }
+            }
     }
 }

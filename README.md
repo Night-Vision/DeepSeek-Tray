@@ -4,7 +4,9 @@ A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://pl
 
 ![Platform](https://img.shields.io/badge/macOS-14%2B-black) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-## Features- **Usage & cost monitoring** — daily token usage, API request counts, per-model stacked usage charts (7d or 30d), and monthly spend via the billing API (`/api/v0/usage/cost`)
+## Features
+
+- **Usage & cost monitoring** — daily token usage, API request counts, per-model stacked usage charts (7d or 30d), and monthly spend via the billing API (`/api/v0/usage/cost`)
 - **Extended View Style** — configurable 7-day or 30-day timeframe preference setting in Preferences for dashboard usage totals, charts, and key breakdowns
 - **Interactive trend charts** — stacked per-model usage bars with top notch ticks, 90° rotated vertical date labels (`.rotationEffect(.degrees(-90))`), and hover-activated vertical dashed guide lines (`dash: [3, 3]`)
 - **Tray display modes** — today's tokens, monthly total, or estimated cost right in the menu bar label
@@ -83,4 +85,4 @@ Credentials live in the macOS Keychain under service `com.deepseek.tray` — nev
 
 ---
 
-> **Note:** dashboard usage StatCards (requests, tokens, and API key breakdown) aggregate the rolling **7-day or 30-day** window based on the user's **Extended View Style** preference setting; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures).sage endpoint itself carries no dollar figures).
+> **Note:** dashboard usage StatCards (requests, tokens, and API key breakdown) aggregate the rolling **7-day or 30-day** window based on the user's **Extended View Style** preference setting; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures).

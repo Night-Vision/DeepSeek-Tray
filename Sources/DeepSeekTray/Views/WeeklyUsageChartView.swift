@@ -56,7 +56,7 @@ struct WeeklyUsageChartView: View {
     private var bars: some View {
         let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
         let maxValue = bounds[0]
-        return HStack(alignment: .bottom, spacing: barSpacing) {
+        return HStack(alignment: .bottom, spacing: days > 7 ? barSpacing : 0) {
             ForEach(Array(shownDays.enumerated()), id: \.offset) { index, day in
                 ZStack(alignment: .bottom) {
                     stackedBar(day: day, maxValue: maxValue)
@@ -76,12 +76,16 @@ struct WeeklyUsageChartView: View {
                         hoveredIndex = isHovered ? index : nil
                     }
                 }
+
+                if days <= 7 && index < shownDays.count - 1 {
+                    Spacer(minLength: 4)
+                }
             }
         }
     }
 
     private var xAxisLabels: some View {
-        HStack(spacing: barSpacing) {
+        HStack(spacing: days > 7 ? barSpacing : 0) {
             ForEach(Array(shownDays.enumerated()), id: \.offset) { index, day in
                 VStack(spacing: 2) {
                     if days <= 7 {
@@ -118,6 +122,10 @@ struct WeeklyUsageChartView: View {
                     }
                 }
                 .frame(width: barWidth, height: 42, alignment: .top)
+
+                if days <= 7 && index < shownDays.count - 1 {
+                    Spacer(minLength: 4)
+                }
             }
         }
         .padding(.leading, 44)
