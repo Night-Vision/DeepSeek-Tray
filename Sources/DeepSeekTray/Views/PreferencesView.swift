@@ -12,6 +12,7 @@ struct PreferencesView: View {
                 ToggleRow(title: "Compact Mini Mode", desc: "Open the mini widget by default", isOn: $prefs.compactMiniDefault)
                 RefreshIntervalRow()
                 TrayStyleRow()
+                ExtendedViewStyleRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)
             }
 
@@ -51,8 +52,7 @@ struct PreferencesView: View {
             }
             .buttonStyle(IconButtonStyle())
         }
-        .padding(.bottom, 14)
-        .overlay(Divider().background(Color.dsBorder), alignment: .bottom)
+        .padding(.bottom, 10)
     }
 
     private func purge() {
@@ -80,8 +80,7 @@ struct ToggleRow: View {
             Toggle("", isOn: $isOn)
                 .tint(.dsAccentBlue)
         }
-        .padding(.vertical, 9)
-        .overlay(Divider().background(Color.white.opacity(0.06)), alignment: .bottom)
+        .padding(.vertical, 8)
     }
 }
 
@@ -106,8 +105,7 @@ struct RefreshIntervalRow: View {
             .labelsHidden()
             .frame(width: 120)
         }
-        .padding(.vertical, 9)
-        .overlay(Divider().background(Color.white.opacity(0.06)), alignment: .bottom)
+        .padding(.vertical, 8)
     }
 }
 
@@ -132,7 +130,31 @@ struct TrayStyleRow: View {
             .labelsHidden()
             .frame(width: 120)
         }
-        .padding(.vertical, 9)
-        .overlay(Divider().background(Color.white.opacity(0.06)), alignment: .bottom)
+        .padding(.vertical, 8)
+    }
+}
+
+struct ExtendedViewStyleRow: View {
+    @ObservedObject var prefs = PreferencesStore.shared
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Extended View Style")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.dsTextPrimary)
+                Text("Timeframe for dashboard usage totals & charts")
+                    .font(.system(size: 9))
+                    .foregroundColor(.dsTextTertiary)
+            }
+            Spacer()
+            Picker("", selection: $prefs.extendedViewStyle) {
+                ForEach(ExtendedViewStyle.allCases) { style in
+                    Text(style.label).tag(style)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 120)
+        }
+        .padding(.vertical, 8)
     }
 }

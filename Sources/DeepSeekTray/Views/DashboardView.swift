@@ -3,6 +3,7 @@ import AppKit
 
 struct DashboardView: View {
     @EnvironmentObject var tracker: UsageTracker
+    @ObservedObject private var prefs = PreferencesStore.shared
     @State private var copiedToastVisible = false
 
     var body: some View {
@@ -11,7 +12,7 @@ struct DashboardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 16) {
                     statCards
-                    WeeklyUsageChartView(daily: tracker.snapshot.dailyTotals)
+                    WeeklyUsageChartView(daily: tracker.snapshot.dailyTotals, days: prefs.extendedViewStyle.days)
                     KeyBreakdownListView(keys: tracker.snapshot.keyBreakdown)
                 }
                 .padding(.top, 14)
@@ -43,10 +44,11 @@ struct DashboardView: View {
 
     private var statCards: some View {
         let snapshot = tracker.snapshot
+        let days = prefs.extendedViewStyle.days
         return VStack(spacing: 16) {
             StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", snapshot.totalCost))", sub: "\(snapshot.usageCurrency) (this month)")
-            StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests (7d)")
-            StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens (7d)")
+            StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests (\(days)d)")
+            StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens (\(days)d)")
         }
     }
 

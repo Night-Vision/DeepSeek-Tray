@@ -33,6 +33,15 @@ final class UsageTracker: ObservableObject {
             .sink { [weak self] style in self?.updateTrayLabelText(style: style) }
             .store(in: &cancellables)
 
+        preferences.$extendedViewStyle
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.refresh()
+                }
+            }
+            .store(in: &cancellables)
+
         startPolling(interval: preferences.refreshInterval)
         // Fetch immediately at launch — the poll timer only fires after the
         // first refreshInterval elapses, leaving the dashboard blank until then.
@@ -51,7 +60,7 @@ final class UsageTracker: ObservableObject {
         var cost: (cost: Double, currency: String)?
         if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
             let client = DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: nil)
-            usage = try? await client.fetchUsage()
+            usage = try? await client.fetchUsage(days: preferences.extendedViewStyle.days)
             cost = try? await client.fetchCost()
         }
 

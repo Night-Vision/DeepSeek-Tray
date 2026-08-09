@@ -61,7 +61,7 @@ struct DiscoveredDashboardUsageClient {
 
     // MARK: - Fetch
 
-    func fetchUsage() async throws -> UsageSnapshot {
+    func fetchUsage(days: Int = 7) async throws -> UsageSnapshot {
         // The interceptor captures relative URLs (e.g. /api/v0/usage/...);
         // resolve them against the platform host.
         let resolved = endpoint.url.hasPrefix("http") ? endpoint.url : "https://platform.deepseek.com" + endpoint.url
@@ -79,7 +79,7 @@ struct DiscoveredDashboardUsageClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.resourceUnavailable)
         }
-        return try parseUsage(data)
+        return try parseUsage(data, days: days)
     }
 
     /// Monthly spend in dollars from the platform's billing API:
@@ -123,7 +123,7 @@ struct DiscoveredDashboardUsageClient {
 
     // MARK: - Parsing (platform schema: data.biz_data.series[].buckets[])
 
-    private func parseUsage(_ data: Data) throws -> UsageSnapshot {
+    private func parseUsage(_ data: Data, days: Int = 7) throws -> UsageSnapshot {
         guard let json = try? JSONSerialization.jsonObject(with: data),
               let root = json as? [String: Any],
               let dataObj = root["data"] as? [String: Any],
@@ -168,31 +168,31 @@ struct DiscoveredDashboardUsageClient {
                 return DailyUsage(date: day.key, totalTokens: day.value.tokens, totalCost: 0, totalRequests: day.value.requests, breakdown: breakdown)
             }
 
-        // 7-day rolling window totals for StatCards and key breakdown.
-        let last7 = Array(snapshot.dailyTotals.suffix(7))
-        let window7Dates = Set(last7.map { $0.date })
-        snapshot.totalTokens = last7.reduce(0) { $0 + $1.totalTokens }
-        snapshot.totalRequests = last7.reduce(0) { $0 + $1.totalRequests }
+        // Rolling window totals for StatCards and key breakdown based on configured days (7 vs 30).
+        let windowDays = Array(snapshot.dailyTotals.suffix(days))
+        let windowDates = Set(windowDays.map { $0.date })
+        snapshot.totalTokens = windowDays.reduce(0) { $0 + $1.totalTokens }
+        snapshot.totalRequests = windowDays.reduce(0) { $0 + $1.totalRequests }
 
-        // Per-key breakdown filtered strictly to the 7-day window.
+        // Per-key breakdown filtered strictly to the window dates.
         var byKey: [String: (name: String, tokens: Int)] = [:]
         for item in series {
             guard let apiKey = item["api_key"] as? [String: Any] else { continue }
             let masked = (apiKey["sensitive_id"] as? String) ?? "—"
             let name = (apiKey["name"] as? String) ?? "Key"
-            var tokens7d = 0
+            var tokensInWindow = 0
             for bucket in (item["buckets"] as? [[String: Any]] ?? []) {
                 guard let time = (bucket["time"] as? NSNumber)?.intValue,
                       let usage = bucket["usage"] as? [String: Any] else { continue }
                 let day = calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(time)))
-                guard window7Dates.contains(day) else { continue }
+                guard windowDates.contains(day) else { continue }
 
-                tokens7d += intVal(usage["RESPONSE_TOKEN"])
+                tokensInWindow += intVal(usage["RESPONSE_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_HIT_TOKEN"])
                     + intVal(usage["PROMPT_CACHE_MISS_TOKEN"])
             }
             let prev = byKey[masked, default: (name, 0)]
-            byKey[masked] = (prev.name, prev.tokens + tokens7d)
+            byKey[masked] = (prev.name, prev.tokens + tokensInWindow)
         }
         let windowTotal = max(snapshot.totalTokens, 1)
         snapshot.keyBreakdown = byKey

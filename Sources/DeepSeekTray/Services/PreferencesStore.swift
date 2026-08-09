@@ -21,6 +21,19 @@ enum RefreshInterval: String, CaseIterable, Identifiable {
     var minutes: Int { Int(rawValue) ?? 15 }
 }
 
+enum ExtendedViewStyle: String, CaseIterable, Identifiable {
+    case sevenDays = "7"
+    case thirtyDays = "30"
+    var id: String { rawValue }
+    var days: Int { Int(rawValue) ?? 7 }
+    var label: String {
+        switch self {
+        case .sevenDays: return "7 Days"
+        case .thirtyDays: return "30 Days"
+        }
+    }
+}
+
 final class PreferencesStore: ObservableObject {
     static let shared = PreferencesStore()
 
@@ -30,6 +43,10 @@ final class PreferencesStore: ObservableObject {
 
     @Published var trayDisplayStyle: TrayDisplayStyle = .hourly {
         didSet { UserDefaults.standard.set(trayDisplayStyle.rawValue, forKey: "trayDisplayStyle") }
+    }
+
+    @Published var extendedViewStyle: ExtendedViewStyle = .sevenDays {
+        didSet { UserDefaults.standard.set(extendedViewStyle.rawValue, forKey: "extendedViewStyle") }
     }
 
     @Published var launchAtLogin: Bool = false {
@@ -48,6 +65,10 @@ final class PreferencesStore: ObservableObject {
         if let raw = UserDefaults.standard.string(forKey: "trayDisplayStyle"),
            let value = TrayDisplayStyle(rawValue: raw) {
             trayDisplayStyle = value
+        }
+        if let raw = UserDefaults.standard.string(forKey: "extendedViewStyle"),
+           let value = ExtendedViewStyle(rawValue: raw) {
+            extendedViewStyle = value
         }
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         compactMiniDefault = UserDefaults.standard.bool(forKey: "compactMiniDefault")

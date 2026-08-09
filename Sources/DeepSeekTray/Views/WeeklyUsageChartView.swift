@@ -2,11 +2,17 @@ import SwiftUI
 
 struct WeeklyUsageChartView: View {
     let daily: [DailyUsage]
+    var days: Int = 7
+
+    @State private var hoveredIndex: Int? = nil
+
+    private var barWidth: CGFloat { days > 7 ? 6 : 16 }
+    private var barSpacing: CGFloat { days > 7 ? 2 : 4 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("7-Day Usage Trend")
+                Text("\(days)-Day Usage Trend")
                     .font(.system(size: 11))
                     .foregroundColor(.dsTextSecondary)
                 Spacer()
@@ -21,15 +27,10 @@ struct WeeklyUsageChartView: View {
                 yAxis
                 bars
             }
-            HStack(spacing: 4) {
-                ForEach(shownDays) { day in
-                    Text(dayLabel(day.date))
-                        .font(.system(size: 10))
-                        .foregroundColor(isToday(day.date) ? .dsAccentBlue : .dsTextTertiary)
-                        .frame(width: 16)
-                }
-            }
-            .padding(.leading, 44)
+            xAxisLabels
+        }
+        .onChange(of: days) { _, _ in
+            hoveredIndex = nil
         }
     }
 
@@ -55,17 +56,79 @@ struct WeeklyUsageChartView: View {
     private var bars: some View {
         let bounds = ChartAxis.niceBounds(for: shownDays.map { $0.totalTokens })
         let maxValue = bounds[0]
-        return HStack(alignment: .bottom, spacing: 4) {
-            ForEach(shownDays) { day in
-                stackedBar(day: day, maxValue: maxValue)
+        return HStack(alignment: .bottom, spacing: barSpacing) {
+            ForEach(Array(shownDays.enumerated()), id: \.offset) { index, day in
+                ZStack(alignment: .bottom) {
+                    stackedBar(day: day, maxValue: maxValue)
+
+                    if days > 7 && hoveredIndex == index {
+                        Path { path in
+                            path.move(to: CGPoint(x: barWidth / 2, y: 0))
+                            path.addLine(to: CGPoint(x: barWidth / 2, y: 90))
+                        }
+                        .stroke(Color.dsTextTertiary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                }
+                .frame(width: barWidth, height: 90, alignment: .bottom)
+                .contentShape(Rectangle().inset(by: -3))
+                .onHover { isHovered in
+                    if days > 7 {
+                        hoveredIndex = isHovered ? index : nil
+                    }
+                }
             }
         }
     }
 
-    /// The chart is "7-Day" — only ever render the most recent 7 entries so a
-    /// longer history (e.g. 30 days) can't overflow the fixed-width popover.
+    private var xAxisLabels: some View {
+        HStack(spacing: barSpacing) {
+            ForEach(Array(shownDays.enumerated()), id: \.offset) { index, day in
+                VStack(spacing: 2) {
+                    if days <= 7 {
+                        Rectangle()
+                            .fill(Color.dsTextTertiary.opacity(0.4))
+                            .frame(width: 1, height: 4)
+
+                        Text(dayLabel(day.date))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(isToday(day.date) ? .dsAccentBlue : .dsTextTertiary)
+                    } else if isStaticDate(index: index) {
+                        Rectangle()
+                            .fill(hoveredIndex == index ? Color.dsAccentBlue : Color.dsTextTertiary.opacity(0.4))
+                            .frame(width: 1, height: 4)
+
+                        Text(shortDateLabel(day.date))
+                            .font(.system(size: 10, weight: hoveredIndex == index ? .bold : .medium, design: .monospaced))
+                            .fixedSize()
+                            .rotationEffect(.degrees(-90))
+                            .foregroundColor(hoveredIndex == index ? .dsAccentBlue : (isToday(day.date) ? .dsAccentBlue : .dsTextTertiary))
+                    } else if hoveredIndex == index {
+                        Rectangle()
+                            .fill(Color.dsAccentBlue)
+                            .frame(width: 1, height: 4)
+
+                        Text(shortDateLabel(day.date))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .fixedSize()
+                            .rotationEffect(.degrees(-90))
+                            .foregroundColor(.dsAccentBlue)
+                    } else {
+                        Color.clear.frame(height: 4)
+                        Spacer()
+                    }
+                }
+                .frame(width: barWidth, height: 42, alignment: .top)
+            }
+        }
+        .padding(.leading, 44)
+    }
+
+    private func isStaticDate(index: Int) -> Bool {
+        days <= 7 || index == 0 || index == shownDays.count - 1 || index % 7 == 0
+    }
+
     private var shownDays: [DailyUsage] {
-        Array(daily.suffix(7))
+        Array(daily.suffix(days))
     }
 
     private func stackedBar(day: DailyUsage, maxValue: Double) -> some View {
@@ -85,8 +148,8 @@ struct WeeklyUsageChartView: View {
             }
         }
         .frame(height: barHeight(tokens: day.totalTokens, max: maxValue, total: total))
-        .frame(width: 16)
-        .cornerRadius(4)
+        .frame(width: barWidth)
+        .cornerRadius(days > 7 ? 2 : 4)
     }
 
     private func barHeight(tokens: Int, max: Double, total: Int) -> CGFloat {
@@ -95,9 +158,9 @@ struct WeeklyUsageChartView: View {
     }
 
     private func average() -> Int {
-        let days = shownDays
-        guard !days.isEmpty else { return 0 }
-        return days.map { $0.totalTokens }.reduce(0, +) / days.count
+        let daysList = shownDays
+        guard !daysList.isEmpty else { return 0 }
+        return daysList.map { $0.totalTokens }.reduce(0, +) / daysList.count
     }
 
     private func formatK(_ value: Int) -> String {
@@ -107,6 +170,12 @@ struct WeeklyUsageChartView: View {
     private func dayLabel(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEEE"
+        return f.string(from: date)
+    }
+
+    private func shortDateLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
         return f.string(from: date)
     }
 

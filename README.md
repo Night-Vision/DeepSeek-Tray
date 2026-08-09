@@ -4,15 +4,15 @@ A lightweight macOS menu-bar app that keeps an eye on your [DeepSeek](https://pl
 
 ![Platform](https://img.shields.io/badge/macOS-14%2B-black) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-## Features
-
-- **Usage & cost monitoring** — daily token usage, API request counts, per-model 7-day charts, and monthly spend via the billing API (`/api/v0/usage/cost`)
+## Features- **Usage & cost monitoring** — daily token usage, API request counts, per-model stacked usage charts (7d or 30d), and monthly spend via the billing API (`/api/v0/usage/cost`)
+- **Extended View Style** — configurable 7-day or 30-day timeframe preference setting in Preferences for dashboard usage totals, charts, and key breakdowns
+- **Interactive trend charts** — stacked per-model usage bars with top notch ticks, 90° rotated vertical date labels (`.rotationEffect(.degrees(-90))`), and hover-activated vertical dashed guide lines (`dash: [3, 3]`)
 - **Tray display modes** — today's tokens, monthly total, or estimated cost right in the menu bar label
 - **Right-click tray menu** — Refresh Now, Open Dashboard, Open Mini Widget, Preferences…, Quit
 - **Two sign-in options** — Portal Email & Password or Google SSO (standalone WKWebView window); the session JWT is stored in macOS Keychain
 - **Automatic usage discovery** — the SSO sheet captures the platform's usage API (endpoint, headers); cost/tokens/charts populate from the replay, including monthly spend via the billing API (`/api/v0/usage/cost`)
-- **Mini widget & charts** — compact popover widget and a 7-day stacked usage chart (per-model bars), both driven by the platform's daily-granularity data (last 7 days)
-- **Dashboard ⇄ mini toggle** — sideways-arrow buttons in both corners: collapse the full dashboard to the mini widget (`→←`) and expand back (`←→`)
+- **Mini widget & charts** — compact popover widget (anchored to 7-day trend) and stacked per-model usage charts driven by daily-granularity data
+- **Dashboard ⇄ mini toggle** — diagonal arrow buttons in both corners: collapse the full dashboard to the mini widget (`↘↖`) and expand back (`↖↘`)
 - **Sizes itself to content** — the popover resizes to each view's natural height (no blank space); Preferences/Dashboard open full-width even from the mini widget
 - **Dark theme** — designed around a custom DS design system
 
@@ -49,7 +49,7 @@ Grab the latest `DeepSeekTray-<version>.zip` from [Releases](https://github.com/
 
 ![App Screenshot](assets/screenshots/Screenshot-tray.jpg)
 ![Dashboard Screenshot](assets/screenshots/Screenshot-expanded-view.jpg)
-![Mini Screenshot](assets/screenshots/Screenshot-mimi-view.jpg)
+![Mini Screenshot](assets/screenshots/Screenshot-mini-view.jpg)
 ![SSO Screenshot](assets/screenshots/Screenshot-login.jpg)
 
 
@@ -83,4 +83,4 @@ Credentials live in the macOS Keychain under service `com.deepseek.tray` — nev
 
 ---
 
-> **Note:** dashboard usage StatCards (requests, tokens, and API key breakdown) aggregate the rolling **last 7 days** to align with the 7-Day Usage Trend chart; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures).
+> **Note:** dashboard usage StatCards (requests, tokens, and API key breakdown) aggregate the rolling **7-day or 30-day** window based on the user's **Extended View Style** preference setting; monthly cost comes from the billing API `/api/v0/usage/cost` (the usage endpoint itself carries no dollar figures).sage endpoint itself carries no dollar figures).

@@ -26,9 +26,9 @@ struct UsageSnapshot {
     static let mock: UsageSnapshot = {
         let calendar = Calendar.current
         let today = Date()
-        let dailyTotals = (0..<7).map { offset -> DailyUsage in
-            let date = calendar.date(byAdding: .day, value: -(6 - offset), to: today)!
-            let tokens = [120_000, 210_000, 95_000, 310_000, 450_000, 180_000, 290_000][offset]
+        let dailyTotals = (0..<30).map { offset -> DailyUsage in
+            let date = calendar.date(byAdding: .day, value: -(29 - offset), to: today)!
+            let tokens = [120_000, 210_000, 95_000, 310_000, 450_000, 180_000, 290_000][offset % 7]
             let cost = Double(tokens) / 1_000_000 * 0.07
             return DailyUsage(
                 date: date,
