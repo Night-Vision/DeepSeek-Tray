@@ -15,7 +15,6 @@ struct DiscoveredDashboardUsageClient {
     static let storageKey = "ds_discovered_usage_endpoint"
 
     let endpoint: DiscoveredEndpoint
-    let cookie: String?
 
     // MARK: - Storage
 
@@ -69,9 +68,6 @@ struct DiscoveredDashboardUsageClient {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method
         request.timeoutInterval = 10
-        if let cookie, !cookie.isEmpty {
-            request.setValue(cookie, forHTTPHeaderField: "Cookie")
-        }
         for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }

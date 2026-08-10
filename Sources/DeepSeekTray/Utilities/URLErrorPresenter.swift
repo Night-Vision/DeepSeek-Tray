@@ -31,15 +31,3 @@ enum URLErrorPresenter {
         return Int(raw)
     }
 }
-
-// Carries the HTTP status so failures name their source instead of surfacing as generic -1011
-enum HTTPError: LocalizedError {
-    case status(code: Int, endpoint: String)
-
-    var errorDescription: String? {
-        if case let .status(code, endpoint) = self {
-            return "HTTP \(code) — \(endpoint)"
-        }
-        return nil
-    }
-}

@@ -16,11 +16,6 @@ final class AuthManager: ObservableObject {
         state.googleSessionLinked = KeychainManager.get(account: "googleToken") != nil
     }
 
-    func openDeepSeekLoginInBrowser() {
-        let url = URL(string: "https://platform.deepseek.com/sign_in")!
-        NSWorkspace.shared.open(url)
-    }
-
     func beginWebSSO(completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "https://platform.deepseek.com/sign_in") else {
             completion(false)

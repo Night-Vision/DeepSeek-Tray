@@ -59,7 +59,7 @@ final class UsageTracker: ObservableObject {
         var usage: UsageSnapshot?
         var cost: (cost: Double, currency: String)?
         if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
-            let client = DiscoveredDashboardUsageClient(endpoint: endpoint, cookie: nil)
+            let client = DiscoveredDashboardUsageClient(endpoint: endpoint)
             usage = try? await client.fetchUsage(days: preferences.extendedViewStyle.days)
             cost = try? await client.fetchCost()
         }
