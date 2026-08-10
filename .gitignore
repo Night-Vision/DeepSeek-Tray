@@ -34,6 +34,7 @@ AGENTS.md
 # Internal Agent Documentation & Metadata
 docs/superpowers/
 docs/Integration-Plan.md
+report.html
 
 # Xcode
 *.xcuserstate
