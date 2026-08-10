@@ -38,8 +38,11 @@ final class TrayStatusItemController: NSObject {
             .sink { [weak self] text in
                 guard let self, let button = self.statusItem.button else { return }
                 button.title = text
-                if self.popover.isShown {
-                    self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let button = self.statusItem.button else { return }
+                    if self.popover.isShown {
+                        self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                    }
                 }
             }
             .store(in: &cancellables)
