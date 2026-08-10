@@ -11,6 +11,14 @@ struct UsageSnapshot {
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
 
+    /// Returns proportional cost for `days` derived from official billing totalCost and token ratio.
+    func costForWindow(days: Int) -> Double {
+        let totalPeriodTokens = dailyTotals.reduce(0) { $0 + $1.totalTokens }
+        guard totalPeriodTokens > 0 else { return totalCost }
+        let windowTokens = Array(dailyTotals.suffix(days)).reduce(0) { $0 + $1.totalTokens }
+        return totalCost * (Double(windowTokens) / Double(totalPeriodTokens))
+    }
+
     static let empty = UsageSnapshot(
         totalCost: 0,
         totalRequests: 0,
