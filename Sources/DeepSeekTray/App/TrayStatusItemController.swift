@@ -32,11 +32,15 @@ final class TrayStatusItemController: NSObject {
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
 
-        // Keep the button title live with the tray label
+        // Keep the button title live with the tray label and keep popover arrow centered
         tracker.$trayLabelText
             .receive(on: RunLoop.main)
             .sink { [weak self] text in
-                self?.statusItem.button?.title = text
+                guard let self, let button = self.statusItem.button else { return }
+                button.title = text
+                if self.popover.isShown {
+                    self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                }
             }
             .store(in: &cancellables)
 

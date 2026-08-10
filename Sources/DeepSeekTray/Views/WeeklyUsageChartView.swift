@@ -105,6 +105,7 @@ struct WeeklyUsageChartView: View {
                             .font(.system(size: 10, weight: hoveredIndex == index ? .bold : .medium, design: .monospaced))
                             .fixedSize()
                             .rotationEffect(.degrees(-90))
+                            .padding(.top, 12)
                             .foregroundColor(hoveredIndex == index ? .dsAccentBlue : (isToday(day.date) ? .dsAccentBlue : .dsTextTertiary))
                     } else if hoveredIndex == index {
                         Rectangle()
@@ -115,13 +116,14 @@ struct WeeklyUsageChartView: View {
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .fixedSize()
                             .rotationEffect(.degrees(-90))
+                            .padding(.top, 12)
                             .foregroundColor(.dsAccentBlue)
                     } else {
                         Color.clear.frame(height: 4)
                         Spacer()
                     }
                 }
-                .frame(width: barWidth, height: 42, alignment: .top)
+                .frame(width: barWidth, height: 52, alignment: .top)
 
                 if days <= 7 && index < shownDays.count - 1 {
                     Spacer(minLength: 4)
@@ -132,7 +134,14 @@ struct WeeklyUsageChartView: View {
     }
 
     private func isStaticDate(index: Int) -> Bool {
-        days <= 7 || index == 0 || index == shownDays.count - 1 || index % 7 == 0
+        if days <= 7 { return true }
+        let lastIndex = shownDays.count - 1
+        if index == 0 || index == lastIndex { return true }
+
+        let distanceToLast = lastIndex - index
+        if distanceToLast <= 3 { return false }
+
+        return index % 7 == 0
     }
 
     private var shownDays: [DailyUsage] {
