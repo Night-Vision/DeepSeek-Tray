@@ -117,7 +117,6 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-        contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
     }
 
     func start(completion: @escaping (Bool) -> Void) {
@@ -274,6 +273,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         saved = true
         let completion = pendingCompletion
         pendingCompletion = nil
+
+        // Break script message handler & retain cycle before window teardown on @MainActor
+        contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
+        contentController = nil
 
         // Break NSWindow -> contentView -> webView -> navigationDelegate -> self cycle
         // before tearing the window down so the sheet actually deallocates.
