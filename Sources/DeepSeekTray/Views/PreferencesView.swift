@@ -46,7 +46,7 @@ struct PreferencesView: View {
                     .foregroundColor(.dsTextPrimary)
             }
             Spacer()
-            Button(action: { tracker.show(.dashboard) }) {
+            Button(action: { tracker.show(prefs.compactMiniDefault ? .mini : .dashboard) }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12))
             }
