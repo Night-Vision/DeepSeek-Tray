@@ -40,6 +40,8 @@ final class TrayStatusItemController: NSObject {
                 button.title = text
                 DispatchQueue.main.async { [weak self] in
                     guard let self, let button = self.statusItem.button else { return }
+                    button.superview?.layoutSubtreeIfNeeded()
+                    button.window?.layoutIfNeeded()
                     if self.popover.isShown {
                         self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
                     }
@@ -54,11 +56,17 @@ final class TrayStatusItemController: NSObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] view in
                 guard let self, let host = self.popover.contentViewController else { return }
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
                     let size = host.preferredContentSize
                     if size.width > 0 {
                         host.preferredContentSize = size
                         self.popover.contentSize = size
+                        if let button = self.statusItem.button, self.popover.isShown {
+                            button.superview?.layoutSubtreeIfNeeded()
+                            button.window?.layoutIfNeeded()
+                            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                        }
                     }
                 }
             }
