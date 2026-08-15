@@ -4,6 +4,20 @@ import Foundation
 // The current platform schema is data.biz_data.series[].buckets[] with
 // {time, usage: {REQUEST, RESPONSE_TOKEN, PROMPT_CACHE_HIT_TOKEN,
 // PROMPT_CACHE_MISS_TOKEN}} — see parseUsage.
+enum DashboardFetchError: Error, LocalizedError {
+    case unauthorized
+    case resourceUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return "Authentication session expired. Please sign in again."
+        case .resourceUnavailable:
+            return "DeepSeek service unavailable."
+        }
+    }
+}
+
 struct DiscoveredDashboardUsageClient {
     struct DiscoveredEndpoint: Codable {
         let url: String
@@ -72,8 +86,14 @@ struct DiscoveredDashboardUsageClient {
             request.setValue(value, forHTTPHeaderField: name)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.resourceUnavailable)
+        guard let http = response as? HTTPURLResponse else {
+            throw DashboardFetchError.resourceUnavailable
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw DashboardFetchError.unauthorized
+        }
+        guard http.statusCode == 200 else {
+            throw DashboardFetchError.resourceUnavailable
         }
         return try parseUsage(data, days: days)
     }
@@ -95,12 +115,18 @@ struct DiscoveredDashboardUsageClient {
             request.setValue(value, forHTTPHeaderField: name)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+        guard let http = response as? HTTPURLResponse else {
+            throw DashboardFetchError.resourceUnavailable
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw DashboardFetchError.unauthorized
+        }
+        guard http.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data),
               let root = json as? [String: Any],
               let dataObj = root["data"] as? [String: Any],
               let bizData = dataObj["biz_data"] as? [[String: Any]] else {
-            throw URLError(.cannotDecodeContentData)
+            throw DashboardFetchError.resourceUnavailable
         }
         var total = 0.0
         var currency = ""

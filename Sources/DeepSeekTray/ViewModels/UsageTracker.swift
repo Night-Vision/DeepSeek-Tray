@@ -58,34 +58,62 @@ final class UsageTracker: ObservableObject {
         // Best-effort dashboard usage via the discovered endpoint (if any).
         var usage: UsageSnapshot?
         var cost: (cost: Double, currency: String)?
+        var isUnauthorized = false
+        var fetchError: String?
+
         if let endpoint = DiscoveredDashboardUsageClient.loadEndpoint() {
             let client = DiscoveredDashboardUsageClient(endpoint: endpoint)
-            usage = try? await client.fetchUsage(days: preferences.extendedViewStyle.days)
-            cost = try? await client.fetchCost()
+
+            do {
+                usage = try await client.fetchUsage(days: preferences.extendedViewStyle.days)
+            } catch DashboardFetchError.unauthorized {
+                isUnauthorized = true
+            } catch {
+                fetchError = error.localizedDescription
+            }
+
+            do {
+                cost = try await client.fetchCost()
+            } catch DashboardFetchError.unauthorized {
+                isUnauthorized = true
+            } catch {
+                if fetchError == nil { fetchError = error.localizedDescription }
+            }
         }
 
-        await MainActor.run { [usage, cost] in
-            var merged = UsageSnapshot.empty
-
-            if let usage {
-                merged.totalCost = usage.totalCost
-                merged.totalRequests = usage.totalRequests
-                merged.totalTokens = usage.totalTokens
-                merged.dailyTotals = usage.dailyTotals
-                merged.keyBreakdown = usage.keyBreakdown
-            }
-            if let cost, cost.cost > 0 {
-                merged.totalCost = cost.cost
-                merged.usageCurrency = cost.currency
+        await MainActor.run { [usage, cost, isUnauthorized, fetchError] in
+            if isUnauthorized {
+                auth.signOut()
+                if !auth.state.googleSessionLinked {
+                    currentView = .auth
+                }
+                return
             }
 
-            snapshot = merged
-            lastError = nil
+            if usage != nil || cost != nil {
+                var merged = snapshot
+                if let usage {
+                    merged.totalCost = usage.totalCost
+                    merged.totalRequests = usage.totalRequests
+                    merged.totalTokens = usage.totalTokens
+                    merged.dailyTotals = usage.dailyTotals
+                    merged.keyBreakdown = usage.keyBreakdown
+                }
+                if let cost, cost.cost > 0 {
+                    merged.totalCost = cost.cost
+                    merged.usageCurrency = cost.currency
+                }
+                snapshot = merged
+                lastError = nil
+                snapshot.lastUpdated = Date()
+            } else if let fetchError {
+                lastError = fetchError
+            }
+
             if !auth.state.googleSessionLinked {
                 currentView = .auth
             }
             updateTrayLabelText(style: preferences.trayDisplayStyle)
-            snapshot.lastUpdated = Date()
         }
     }
 
