@@ -45,7 +45,9 @@ PLIST
 
 # Adhoc codesign (no Developer ID, no sandbox): Gatekeeper will warn on first
 # open — users right-click -> Open once, or xattr -dr com.apple.quarantine.
-codesign --force --sign - "$STAGE"
+# Entitlements (network.client only, sandbox-safe) are applied so the shipped
+# app matches the project's declared entitlements file.
+codesign --force --entitlements DeepSeekTray.entitlements --sign - "$STAGE"
 
 ditto -c -k --keepParent "$STAGE" "$DIST/$APP_NAME-$VERSION.zip"
 echo "==> Built $DIST/$APP_NAME-$VERSION.zip"
