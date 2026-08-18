@@ -11,12 +11,24 @@ struct UsageSnapshot {
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
 
-    /// Returns proportional cost for `days` derived from official billing totalCost and token ratio.
-    func costForWindow(days: Int) -> Double {
+    /// Proportional cost for `days` derived from official billing totalCost and
+    /// token ratio. Returns `(amount, estimated)`:
+    /// - estimated == true  → proportional window estimate (all window days are
+    ///   inside the current calendar month, so billing-month and token window
+    ///   describe the same period)
+    /// - estimated == false → the raw monthly bill (window spans a month
+    ///   boundary, so a ratio would silently mix periods — show the honest total)
+    func costForWindow(days: Int) -> (amount: Double, estimated: Bool) {
         let totalPeriodTokens = dailyTotals.reduce(0) { $0 + $1.totalTokens }
-        guard totalPeriodTokens > 0 else { return totalCost }
-        let windowTokens = Array(dailyTotals.suffix(days)).reduce(0) { $0 + $1.totalTokens }
-        return totalCost * (Double(windowTokens) / Double(totalPeriodTokens))
+        guard totalPeriodTokens > 0 else { return (totalCost, false) }
+        let window = Array(dailyTotals.suffix(days))
+        let calendar = Calendar.current
+        let withinMonth = window.allSatisfy {
+            calendar.isDate($0.date, equalTo: Date(), toGranularity: .month)
+        }
+        guard withinMonth else { return (totalCost, false) }
+        let windowTokens = window.reduce(0) { $0 + $1.totalTokens }
+        return (totalCost * (Double(windowTokens) / Double(totalPeriodTokens)), true)
     }
 
     static let empty = UsageSnapshot(

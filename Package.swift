@@ -5,16 +5,16 @@ let package = Package(
     name: "DeepSeekTray",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "DeepSeekTray", targets: ["DeepSeekTray"]),
-        .executable(name: "DeepSeekTrayTests", targets: ["DeepSeekTrayTests"])
+        .executable(name: "DeepSeekTray", targets: ["DeepSeekTray"])
     ],
     targets: [
         .executableTarget(
             name: "DeepSeekTray",
             path: "Sources/DeepSeekTray"
         ),
-        .executableTarget(
+        .testTarget(
             name: "DeepSeekTrayTests",
+            dependencies: ["DeepSeekTray"],
             path: "Tests/DeepSeekTrayTests"
         )
     ]
