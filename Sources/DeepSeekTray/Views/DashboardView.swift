@@ -45,10 +45,10 @@ struct DashboardView: View {
     private var statCards: some View {
         let snapshot = tracker.snapshot
         let days = prefs.extendedViewStyle.days
-        let costValue = snapshot.costForWindow(days: days)
+        let cost = snapshot.costForWindow(days: days)
 
         return VStack(spacing: 16) {
-            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", costValue))", sub: "\(snapshot.usageCurrency) (\(days)d)")
+            StatCard(title: "COST", value: "\(currencySymbol(snapshot.usageCurrency))\(String(format: "%.2f", cost.amount))", sub: "\(snapshot.usageCurrency) (\(cost.estimated ? "\(days)d" : "monthly"))")
             StatCard(title: "API REQUESTS", value: Formatter.comma(snapshot.totalRequests), sub: "requests (\(days)d)")
             StatCard(title: "TOKENS", value: Formatter.comma(snapshot.totalTokens), sub: "tokens (\(days)d)")
         }

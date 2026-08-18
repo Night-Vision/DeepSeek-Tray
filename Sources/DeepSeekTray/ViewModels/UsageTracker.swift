@@ -93,12 +93,17 @@ final class UsageTracker: ObservableObject {
             if usage != nil || cost != nil {
                 var merged = snapshot
                 if let usage {
-                    merged.totalCost = usage.totalCost
+                    // totalCost is deliberately NOT copied from usage: parseUsage
+                    // never sets it (usage payload is token-only), so it would
+                    // always write 0 and clobber the previous valid cost when the
+                    // cost endpoint fails. Cost comes only from fetchCost() below.
                     merged.totalRequests = usage.totalRequests
                     merged.totalTokens = usage.totalTokens
                     merged.dailyTotals = usage.dailyTotals
                     merged.keyBreakdown = usage.keyBreakdown
                 }
+                // Note: `cost.cost > 0` also skips a legitimate $0 month — the
+                // previous value stays visible until a non-zero bill arrives.
                 if let cost, cost.cost > 0 {
                     merged.totalCost = cost.cost
                     merged.usageCurrency = cost.currency
