@@ -1,6 +1,6 @@
 # Swift Package Manager
 .build/
-.swiftpm/
+.swift-module-cache
 Package.resolved
 
 # Packaging & Release Artifacts
