@@ -48,4 +48,28 @@ final class UnitTests: XCTestCase {
         XCTAssertFalse(cost.estimated)
         XCTAssertEqual(cost.amount, 10.0, accuracy: 0.001)
     }
+
+    func testParseUsageBucketsUseUTCDayNotLocalTimeZone() throws {
+        // epoch 0 = 1970-01-01T00:00:00Z. Must land on Jan 1 UTC regardless of
+        // the test machine's local time zone.
+        let json = """
+        {"data":{"biz_data":{"series":[{"model":"deepseek-chat","buckets":[
+            {"time":0,"usage":{"REQUEST":1,"RESPONSE_TOKEN":100,"PROMPT_CACHE_HIT_TOKEN":0,"PROMPT_CACHE_MISS_TOKEN":0}}
+        ]}]}}}
+        """.data(using: .utf8)!
+
+        let endpoint = DiscoveredDashboardUsageClient.DiscoveredEndpoint(
+            url: "", method: "GET", headers: [:], discoveredAt: Date()
+        )
+        let client = DiscoveredDashboardUsageClient(endpoint: endpoint)
+        let snapshot = try client.parseUsage(json, days: 7)
+
+        XCTAssertEqual(snapshot.dailyTotals.count, 1)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let comps = utc.dateComponents([.year, .month, .day], from: snapshot.dailyTotals[0].date)
+        XCTAssertEqual(comps.year, 1970)
+        XCTAssertEqual(comps.month, 1)
+        XCTAssertEqual(comps.day, 1)
+    }
 }
