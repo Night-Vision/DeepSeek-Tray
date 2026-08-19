@@ -145,7 +145,7 @@ struct DiscoveredDashboardUsageClient {
 
     // MARK: - Parsing (platform schema: data.biz_data.series[].buckets[])
 
-    private func parseUsage(_ data: Data, days: Int = 7) throws -> UsageSnapshot {
+    func parseUsage(_ data: Data, days: Int = 7) throws -> UsageSnapshot {
         guard let json = try? JSONSerialization.jsonObject(with: data),
               let root = json as? [String: Any],
               let dataObj = root["data"] as? [String: Any],
@@ -171,8 +171,11 @@ struct DiscoveredDashboardUsageClient {
             }
         }
 
-        // Daily totals — buckets are day-granularity (epoch steps of 86400).
-        let calendar = Calendar(identifier: .gregorian)
+        // Daily totals — buckets are day-granularity (epoch steps of 86400, UTC-aligned).
+        // Must bucket in UTC, not the device's local zone, or a day's usage shifts
+        // onto the wrong local date (e.g. "today" reads 0 for any TZ behind UTC).
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
         var byDay: [Date: (tokens: Int, requests: Int)] = [:]
         var byDayModel: [Date: [String: Int]] = [:]
         for bucket in rawBuckets {
