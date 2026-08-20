@@ -107,6 +107,7 @@ final class UsageTracker: ObservableObject {
                 if let cost, cost.cost > 0 {
                     merged.totalCost = cost.cost
                     merged.usageCurrency = cost.currency
+                    NotificationManager.checkBudget(cost: cost.cost, budget: preferences.monthlyBudget, currencySymbol: currencySymbol(cost.currency))
                 }
                 snapshot = merged
                 lastError = nil
@@ -134,6 +135,10 @@ final class UsageTracker: ObservableObject {
         case .cost:
             let symbol = currencySymbol(snapshot.usageCurrency)
             trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", snapshot.totalCost))"
+        case .todayCost:
+            let symbol = currencySymbol(snapshot.usageCurrency)
+            let today = snapshot.costForWindow(days: 1).amount
+            trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", today))/day"
         }
     }
 

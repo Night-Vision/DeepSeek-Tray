@@ -13,6 +13,7 @@ struct PreferencesView: View {
                 RefreshIntervalRow()
                 TrayStyleRow()
                 ExtendedViewStyleRow()
+                BudgetRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)
             }
 
@@ -154,6 +155,28 @@ struct ExtendedViewStyleRow: View {
             }
             .labelsHidden()
             .frame(width: 120)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+struct BudgetRow: View {
+    @ObservedObject var prefs = PreferencesStore.shared
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Monthly Budget")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.dsTextPrimary)
+                Text("Alerts at 80% / 100% of budget; 0 = off")
+                    .font(.system(size: 9))
+                    .foregroundColor(.dsTextTertiary)
+            }
+            Spacer()
+            TextField("", value: $prefs.monthlyBudget, format: .number)
+                .darkTextField()
+                .frame(width: 90)
+                .multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 8)
     }

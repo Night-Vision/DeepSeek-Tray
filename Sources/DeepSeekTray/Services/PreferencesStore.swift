@@ -1,13 +1,14 @@
 import Foundation
 
 enum TrayDisplayStyle: String, CaseIterable, Identifiable {
-    case hourly, monthly, cost
+    case hourly, monthly, cost, todayCost
     var id: String { rawValue }
     var label: String {
         switch self {
         case .hourly: return "Today's Tokens"
         case .monthly: return "Window Tokens"
         case .cost: return "Est. Cost"
+        case .todayCost: return "Today's Cost"
         }
     }
 }
@@ -57,6 +58,10 @@ final class PreferencesStore: ObservableObject {
         didSet { UserDefaults.standard.set(compactMiniDefault, forKey: "compactMiniDefault") }
     }
 
+    @Published var monthlyBudget: Double = 0 {
+        didSet { UserDefaults.standard.set(monthlyBudget, forKey: "monthlyBudget") }
+    }
+
     private init() {
         if let raw = UserDefaults.standard.string(forKey: "refreshInterval"),
            let value = RefreshInterval(rawValue: raw) {
@@ -72,5 +77,6 @@ final class PreferencesStore: ObservableObject {
         }
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         compactMiniDefault = UserDefaults.standard.bool(forKey: "compactMiniDefault")
+        monthlyBudget = UserDefaults.standard.double(forKey: "monthlyBudget")
     }
 }

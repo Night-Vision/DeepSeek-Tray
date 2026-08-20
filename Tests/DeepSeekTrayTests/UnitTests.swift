@@ -72,4 +72,21 @@ final class UnitTests: XCTestCase {
         XCTAssertEqual(comps.month, 1)
         XCTAssertEqual(comps.day, 1)
     }
+
+    func testBudgetThresholdsPending() {
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 90, budget: 100, alreadyFired: []), [80])
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 110, budget: 100, alreadyFired: []), [80, 100])
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 110, budget: 100, alreadyFired: ["80"]), [100])
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 110, budget: 100, alreadyFired: ["80", "100"]), [])
+    }
+
+    func testBudgetDisabledAtZero() {
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 90, budget: 0, alreadyFired: []), [])
+        XCTAssertEqual(NotificationManager.pendingThresholds(cost: 0, budget: 100, alreadyFired: []), [])
+    }
+
+    func testBudgetMonthKey() {
+        let date = Calendar.current.date(from: DateComponents(year: 2025, month: 7, day: 1))!
+        XCTAssertEqual(NotificationManager.monthKey(date: date), "2025-7")
+    }
 }
