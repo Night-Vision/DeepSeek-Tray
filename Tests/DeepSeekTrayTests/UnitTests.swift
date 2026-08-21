@@ -89,4 +89,58 @@ final class UnitTests: XCTestCase {
         let date = Calendar.current.date(from: DateComponents(year: 2025, month: 7, day: 1))!
         XCTAssertEqual(NotificationManager.monthKey(date: date), "2025-7")
     }
+
+    // MARK: - Export
+
+    private func exportFixture() -> UsageSnapshot {
+        let day0 = Date(timeIntervalSince1970: 0)
+        return UsageSnapshot(
+            totalCost: 9.0,
+            totalRequests: 30,
+            totalTokens: 300,
+            usageCurrency: "USD",
+            dailyTotals: [
+                DailyUsage(date: day0, totalTokens: 100, totalCost: 0, totalRequests: 10,
+                           breakdown: [UsageBreakdown(category: "deepseek-chat", tokens: 100, cost: 0)]),
+                DailyUsage(date: day0.addingTimeInterval(86_400), totalTokens: 200, totalCost: 0, totalRequests: 20,
+                           breakdown: [UsageBreakdown(category: "deepseek-chat", tokens: 200, cost: 0)]),
+            ],
+            keyBreakdown: [KeyUsage(name: "Prod", maskedKeyId: "sk-1...9", tokens: 300, percentage: 100)],
+            lastUpdated: day0
+        )
+    }
+
+    /// Guards the all-zeros regression: DailyUsage.totalCost is always 0 from the
+    /// API, so export must allocate the real billed total across days.
+    func testDailyCostsAllocateBilledTotal() {
+        let costs = UsageExporter.dailyCosts(exportFixture())
+        XCTAssertEqual(costs.reduce(0, +), 9.0, accuracy: 0.0001)
+        XCTAssertEqual(costs[0], 3.0, accuracy: 0.0001)
+        XCTAssertEqual(costs[1], 6.0, accuracy: 0.0001)
+    }
+
+    func testDailyCostsZeroTokensDoesNotDivideByZero() {
+        var snapshot = exportFixture()
+        snapshot.dailyTotals = [DailyUsage(date: Date(), totalTokens: 0, totalCost: 0, totalRequests: 0, breakdown: [])]
+        XCTAssertEqual(UsageExporter.dailyCosts(snapshot), [0])
+    }
+
+    func testCSVShape() {
+        let lines = UsageExporter.csv(exportFixture()).split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, 3) // header + 2 days
+        XCTAssertEqual(lines[0], "date,tokens,requests,estimated_cost_usd")
+        XCTAssertEqual(lines[1], "1970-01-01,100,10,3.0000")
+    }
+
+    func testJSONTopLevelKeys() throws {
+        let data = try UsageExporter.json(exportFixture(), windowDays: 7)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let root = try XCTUnwrap(obj)
+        XCTAssertEqual(root["billedMonthlyCost"] as? Double, 9.0)
+        XCTAssertEqual(root["costAllocationIsEstimated"] as? Bool, true)
+        XCTAssertEqual(root["windowDays"] as? Int, 7)
+        XCTAssertEqual((root["daily"] as? [[String: Any]])?.count, 2)
+        XCTAssertEqual((root["keys"] as? [[String: Any]])?.count, 1)
+    }
 }
+
