@@ -142,5 +142,15 @@ final class UnitTests: XCTestCase {
         XCTAssertEqual((root["daily"] as? [[String: Any]])?.count, 2)
         XCTAssertEqual((root["keys"] as? [[String: Any]])?.count, 1)
     }
+
+    // MARK: - Retry backoff
+
+    func testBackoffDoublesThenSaturatesAtCap() {
+        var d = Backoff.initial
+        var seq = [d]
+        for _ in 0..<5 { d = Backoff.next(d); seq.append(d) }
+        XCTAssertEqual(seq, [30, 60, 120, 240, 300, 300])
+        XCTAssertEqual(Backoff.next(Backoff.cap), Backoff.cap)
+    }
 }
 
