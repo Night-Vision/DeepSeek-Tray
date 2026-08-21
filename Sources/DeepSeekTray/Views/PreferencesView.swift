@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct PreferencesView: View {
     @EnvironmentObject var tracker: UsageTracker
@@ -14,6 +16,7 @@ struct PreferencesView: View {
                 TrayStyleRow()
                 ExtendedViewStyleRow()
                 BudgetRow()
+                ExportRow()
                 ToggleRow(title: "Start at Login", desc: "Launch background daemon on boot", isOn: $prefs.launchAtLogin)
             }
 
@@ -179,5 +182,68 @@ struct BudgetRow: View {
                 .multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 8)
+    }
+}
+
+struct ExportRow: View {
+    @EnvironmentObject var tracker: UsageTracker
+    @ObservedObject private var prefs = PreferencesStore.shared
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Export Usage Data")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.dsTextPrimary)
+                Text("Save the current \(prefs.extendedViewStyle.days)-day window; cost is estimated")
+                    .font(.system(size: 9))
+                    .foregroundColor(.dsTextTertiary)
+            }
+            Spacer()
+            HStack(spacing: 6) {
+                Button("CSV") { exportCSV() }
+                    .buttonStyle(SmallPillButtonStyle())
+                Button("JSON") { exportJSON() }
+                    .buttonStyle(SmallPillButtonStyle())
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func exportCSV() {
+        let data = Data(UsageExporter.csv(tracker.snapshot).utf8)
+        save(data, name: UsageExporter.suggestedFilename(ext: "csv"), type: .commaSeparatedText)
+    }
+
+    private func exportJSON() {
+        guard let data = try? UsageExporter.json(tracker.snapshot, windowDays: prefs.extendedViewStyle.days) else { return }
+        save(data, name: UsageExporter.suggestedFilename(ext: "json"), type: .json)
+    }
+
+    /// Data is encoded before the panel opens: the popover is `.transient` and
+    /// dismisses the moment focus leaves, so nothing here may depend on this view
+    /// still being alive. `.accessory` apps also need an explicit activate or the
+    /// panel can open behind the frontmost app without focus.
+    private func save(_ data: Data, name: String, type: UTType) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [type]
+        panel.nameFieldStringValue = name
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url)
+    }
+}
+
+struct SmallPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.dsAccentBlueHover)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.dsAccentBlue.opacity(configuration.isPressed ? 0.30 : 0.15))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.dsAccentBlue.opacity(0.3), lineWidth: 1))
+            .cornerRadius(6)
+            .contentShape(Rectangle())
     }
 }
