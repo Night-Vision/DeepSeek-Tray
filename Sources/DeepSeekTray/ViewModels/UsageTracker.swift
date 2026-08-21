@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Network
 
 @MainActor
 final class UsageTracker: ObservableObject {
@@ -11,6 +12,10 @@ final class UsageTracker: ObservableObject {
     @Published var trayLabelText: String = "DS: --"
 
     private var timer: Timer?
+    private var pathMonitor: NWPathMonitor?
+    private var retryTask: Task<Void, Never>?
+    private var retryDelay: Double = Backoff.initial
+    private var wasOffline = false
     private var cancellables = Set<AnyCancellable>()
     private let preferences = PreferencesStore.shared
     private let auth = AuthManager.shared
@@ -43,6 +48,7 @@ final class UsageTracker: ObservableObject {
             .store(in: &cancellables)
 
         startPolling(interval: preferences.refreshInterval)
+        startPathMonitor()
         // Fetch immediately at launch — the poll timer only fires after the
         // first refreshInterval elapses, leaving the dashboard blank until then.
         Task { @MainActor [weak self] in
@@ -83,6 +89,7 @@ final class UsageTracker: ObservableObject {
 
         await MainActor.run { [usage, cost, isUnauthorized, fetchError] in
             if isUnauthorized {
+                clearRetry()
                 auth.signOut()
                 if !auth.state.googleSessionLinked {
                     currentView = .auth
@@ -116,11 +123,64 @@ final class UsageTracker: ObservableObject {
                 lastError = fetchError
             }
 
+            // Keyed off fetchError, not lastError: a partial failure (one of the
+            // two calls succeeded) clears lastError above but still deserves a retry.
+            if fetchError == nil { clearRetry() } else { scheduleRetry() }
+
             if !auth.state.googleSessionLinked {
                 currentView = .auth
             }
             updateTrayLabelText(style: preferences.trayDisplayStyle)
         }
+    }
+
+    // MARK: - Retry
+
+    /// Retries after the current backoff delay, then widens it.
+    private func scheduleRetry() {
+        retryTask?.cancel()
+        let delay = retryDelay
+        retryDelay = Backoff.next(retryDelay)
+        retryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.refresh()
+        }
+    }
+
+    /// Retries at once — the network just came back, no reason to wait.
+    private func retryNow() {
+        retryTask?.cancel()
+        retryTask = Task { @MainActor [weak self] in
+            await self?.refresh()
+        }
+    }
+
+    private func clearRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        retryDelay = Backoff.initial
+    }
+
+    /// Refreshes on the offline → online edge only. Without the `wasOffline`
+    /// guard every path change (Wi-Fi ⇄ Ethernet, VPN up/down) would fetch, and
+    /// the handler's immediate first callback would duplicate the launch fetch.
+    private func startPathMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !satisfied {
+                    self.wasOffline = true
+                } else if self.wasOffline {
+                    self.wasOffline = false
+                    self.retryNow()
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.deepseek.tray.pathmonitor"))
+        pathMonitor = monitor
     }
 
     func updateTrayLabelText(style: TrayDisplayStyle) {
@@ -160,5 +220,9 @@ final class UsageTracker: ObservableObject {
         }
     }
 
-    deinit { timer?.invalidate() }
+    deinit {
+        timer?.invalidate()
+        pathMonitor?.cancel()
+        retryTask?.cancel()
+    }
 }
