@@ -35,7 +35,8 @@ struct DashboardView: View {
             }
             Spacer()
             HStack(spacing: 6) {
-                StatusBadge(text: "Active", warning: false)
+                StatusBadge(text: tracker.lastError == nil ? "Active" : "Stale",
+                            warning: tracker.lastError != nil)
             }
         }
         .padding(.bottom, 14)

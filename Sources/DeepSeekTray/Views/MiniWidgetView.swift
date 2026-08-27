@@ -57,8 +57,10 @@ struct MiniWidgetView: View {
                     .tracking(0.5)
             }
             Spacer()
+            // Amber whenever the last refresh failed, wholly or partly — this is
+            // the default view, so a silent green dot hides stale numbers.
             Circle()
-                .fill(Color.dsAccentGreen)
+                .fill(tracker.lastError == nil ? Color.dsAccentGreen : Color.dsAccentAmber)
                 .frame(width: 6, height: 6)
         }
     }

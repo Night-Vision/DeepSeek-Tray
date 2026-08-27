@@ -31,6 +31,31 @@ struct UsageSnapshot {
         return (totalCost * (Double(windowTokens) / Double(totalPeriodTokens)), true)
     }
 
+    /// Applies one fetch result to this snapshot, leaving untouched anything the
+    /// fetch did not return. Pure, so the partial-failure matrix is testable
+    /// without a network or an app instance.
+    ///
+    /// Two invariants live here:
+    /// - `usage` never writes `totalCost`: parseUsage never sets it (the usage
+    ///   payload is token-only), so copying it would zero out a good cost every
+    ///   time the cost call fails.
+    /// - a `cost` of 0 never overwrites a good cost. Also skips a legitimate $0
+    ///   month — the previous value stays until a non-zero bill arrives.
+    func applying(usage: UsageSnapshot?, cost: (cost: Double, currency: String)?) -> UsageSnapshot {
+        var merged = self
+        if let usage {
+            merged.totalRequests = usage.totalRequests
+            merged.totalTokens = usage.totalTokens
+            merged.dailyTotals = usage.dailyTotals
+            merged.keyBreakdown = usage.keyBreakdown
+        }
+        if let cost, cost.cost > 0 {
+            merged.totalCost = cost.cost
+            merged.usageCurrency = cost.currency
+        }
+        return merged
+    }
+
     static let empty = UsageSnapshot(
         totalCost: 0,
         totalRequests: 0,

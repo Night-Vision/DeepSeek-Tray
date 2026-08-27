@@ -98,33 +98,18 @@ final class UsageTracker: ObservableObject {
             }
 
             if usage != nil || cost != nil {
-                var merged = snapshot
-                if let usage {
-                    // totalCost is deliberately NOT copied from usage: parseUsage
-                    // never sets it (usage payload is token-only), so it would
-                    // always write 0 and clobber the previous valid cost when the
-                    // cost endpoint fails. Cost comes only from fetchCost() below.
-                    merged.totalRequests = usage.totalRequests
-                    merged.totalTokens = usage.totalTokens
-                    merged.dailyTotals = usage.dailyTotals
-                    merged.keyBreakdown = usage.keyBreakdown
-                }
-                // Note: `cost.cost > 0` also skips a legitimate $0 month — the
-                // previous value stays visible until a non-zero bill arrives.
+                snapshot = snapshot.applying(usage: usage, cost: cost)
+                snapshot.lastUpdated = Date()
                 if let cost, cost.cost > 0 {
-                    merged.totalCost = cost.cost
-                    merged.usageCurrency = cost.currency
                     NotificationManager.checkBudget(cost: cost.cost, budget: preferences.monthlyBudget, currencySymbol: currencySymbol(cost.currency))
                 }
-                snapshot = merged
-                lastError = nil
-                snapshot.lastUpdated = Date()
-            } else if let fetchError {
-                lastError = fetchError
             }
 
-            // Keyed off fetchError, not lastError: a partial failure (one of the
-            // two calls succeeded) clears lastError above but still deserves a retry.
+            // Assigned unconditionally: keying this off "did anything succeed"
+            // swallowed the error whenever one of the two calls failed and the
+            // other did not, leaving stale data looking fresh.
+            lastError = fetchError
+
             if fetchError == nil { clearRetry() } else { scheduleRetry() }
 
             if !auth.state.googleSessionLinked {

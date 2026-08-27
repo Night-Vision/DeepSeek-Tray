@@ -152,5 +152,49 @@ final class UnitTests: XCTestCase {
         XCTAssertEqual(seq, [30, 60, 120, 240, 300, 300])
         XCTAssertEqual(Backoff.next(Backoff.cap), Backoff.cap)
     }
+
+    // MARK: - Snapshot merge (partial-failure matrix)
+
+    private func previousSnapshot() -> UsageSnapshot {
+        UsageSnapshot(
+            totalCost: 3.24, totalRequests: 100, totalTokens: 1000, usageCurrency: "USD",
+            dailyTotals: [DailyUsage(date: Date(timeIntervalSince1970: 0), totalTokens: 1000,
+                                     totalCost: 0, totalRequests: 100, breakdown: [])],
+            keyBreakdown: [KeyUsage(name: "Prod", maskedKeyId: "sk-1...9", tokens: 1000, percentage: 100)],
+            lastUpdated: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    /// parseUsage always leaves totalCost at 0, so applying a usage payload must
+    /// never write it — otherwise a failed cost call zeroes the displayed bill.
+    func testUsageOnlyPreservesPreviousCost() {
+        let fresh = UsageSnapshot(totalCost: 0, totalRequests: 250, totalTokens: 5000,
+                                  usageCurrency: "USD", dailyTotals: [], keyBreakdown: [],
+                                  lastUpdated: Date())
+        let merged = previousSnapshot().applying(usage: fresh, cost: nil)
+        XCTAssertEqual(merged.totalCost, 3.24, accuracy: 0.0001)
+        XCTAssertEqual(merged.totalTokens, 5000)
+    }
+
+    func testCostOnlyPreservesPreviousUsage() {
+        let merged = previousSnapshot().applying(usage: nil, cost: (cost: 9.99, currency: "USD"))
+        XCTAssertEqual(merged.totalCost, 9.99, accuracy: 0.0001)
+        XCTAssertEqual(merged.totalTokens, 1000)
+        XCTAssertEqual(merged.dailyTotals.count, 1)
+        XCTAssertEqual(merged.keyBreakdown.count, 1)
+    }
+
+    func testZeroCostDoesNotOverwriteGoodCost() {
+        let merged = previousSnapshot().applying(usage: nil, cost: (cost: 0, currency: "USD"))
+        XCTAssertEqual(merged.totalCost, 3.24, accuracy: 0.0001)
+    }
+
+    func testApplyingNothingIsIdentity() {
+        let prev = previousSnapshot()
+        let merged = prev.applying(usage: nil, cost: nil)
+        XCTAssertEqual(merged.totalCost, prev.totalCost)
+        XCTAssertEqual(merged.totalTokens, prev.totalTokens)
+        XCTAssertEqual(merged.dailyTotals.count, prev.dailyTotals.count)
+    }
 }
 
