@@ -2,6 +2,39 @@ import SwiftUI
 import Combine
 import Network
 
+/// When to attempt a silent session renewal and how often (webview churn guard).
+enum RenewalPolicy {
+    /// Minimum gap between *proactive* (endpoint-lost) renewal attempts.
+    static let cooldown: TimeInterval = 300
+    /// Consecutive failures before falling back to an interactive sign-in.
+    static let maxConsecutiveFailures = 2
+
+    static func shouldAttempt(consecutiveFailures: Int) -> Bool {
+        consecutiveFailures < maxConsecutiveFailures
+    }
+
+    static func cooldownElapsed(since lastAttempt: Date?, now: Date = Date()) -> Bool {
+        guard let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= cooldown
+    }
+}
+
+/// Best-effort JWT `exp` read (no signature verification — diagnostics only).
+enum JWT {
+    static func expiry(of token: String) -> Date? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var b64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = (obj["exp"] as? NSNumber)?.doubleValue else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+}
+
 @MainActor
 final class UsageTracker: ObservableObject {
     static let shared = UsageTracker()
@@ -16,6 +49,9 @@ final class UsageTracker: ObservableObject {
     private var retryTask: Task<Void, Never>?
     private var retryDelay: Double = Backoff.initial
     private var wasOffline = false
+    private var renewalInFlight = false
+    private var lastRenewalAttempt: Date?
+    private var consecutiveRenewalFailures = 0
     private var cancellables = Set<AnyCancellable>()
     private let preferences = PreferencesStore.shared
     private let auth = AuthManager.shared
@@ -28,6 +64,18 @@ final class UsageTracker: ObservableObject {
             currentView = preferences.compactMiniDefault ? .mini : .dashboard
         } else {
             currentView = .auth
+        }
+
+        // Launch diagnostics: the half-a-session state (token without endpoint)
+        // is the "Linked but data never updates" bug; log it if present.
+        if let jwt = KeychainManager.get(account: "googleToken") {
+            let hasEndpoint = DiscoveredDashboardUsageClient.loadEndpoint() != nil
+            print("[UsageTracker] launch state: token present, endpoint \(hasEndpoint ? "present" : "MISSING")")
+            if let exp = JWT.expiry(of: jwt) {
+                let left = exp.timeIntervalSinceNow
+                let text = left > 0 ? "expires in \(max(1, Int(left / 3600)))h" : "expired \(max(1, Int(-left / 3600)))h ago"
+                print("[UsageTracker] googleToken \(text) (\(exp))")
+            }
         }
 
         preferences.$refreshInterval
@@ -61,6 +109,20 @@ final class UsageTracker: ObservableObject {
     }
 
     func refresh() async {
+        await refreshOnce(allowRenewalRetry: true)
+    }
+
+    /// Self-heals a lost session before fetching: a token with no discovered
+    /// endpoint silently re-captures both; a 401/403 (expired token) silently
+    /// re-captures once and retries the fetch. Interactive sign-out is the
+    /// fallback only when silent renewal fails.
+    private func refreshOnce(allowRenewalRetry: Bool) async {
+        if DiscoveredDashboardUsageClient.loadEndpoint() == nil,
+           KeychainManager.get(account: "googleToken") != nil {
+            print("[UsageTracker] token present but endpoint missing — attempting silent session renewal")
+            _ = await attemptSilentRenewal(respectCooldown: true)
+        }
+
         // Best-effort dashboard usage via the discovered endpoint (if any).
         var usage: UsageSnapshot?
         var cost: (cost: Double, currency: String)?
@@ -87,6 +149,17 @@ final class UsageTracker: ObservableObject {
             }
         }
 
+        // Expired/invalid token: attempt one silent re-capture before the
+        // existing sign-out path nukes the session.
+        if isUnauthorized, allowRenewalRetry {
+            let renewed = await attemptSilentRenewal(respectCooldown: false)
+            if renewed {
+                print("[UsageTracker] session renewed after 401 — refreshing once more")
+                await refreshOnce(allowRenewalRetry: false)
+                return
+            }
+        }
+
         await MainActor.run { [usage, cost, isUnauthorized, fetchError] in
             if isUnauthorized {
                 clearRetry()
@@ -98,6 +171,8 @@ final class UsageTracker: ObservableObject {
             }
 
             if usage != nil || cost != nil {
+                // A real fetch succeeded — the session is healthy again.
+                consecutiveRenewalFailures = 0
                 snapshot = snapshot.applying(usage: usage, cost: cost)
                 snapshot.lastUpdated = Date()
                 if let cost, cost.cost > 0 {
@@ -109,6 +184,7 @@ final class UsageTracker: ObservableObject {
             // swallowed the error whenever one of the two calls failed and the
             // other did not, leaving stale data looking fresh.
             lastError = fetchError
+            if let fetchError { print("[UsageTracker] fetch failed: \(fetchError)") }
 
             if fetchError == nil { clearRetry() } else { scheduleRetry() }
 
@@ -145,6 +221,26 @@ final class UsageTracker: ObservableObject {
         retryTask?.cancel()
         retryTask = nil
         retryDelay = Backoff.initial
+    }
+
+    // MARK: - Session renewal
+
+    /// One silent WebKit re-capture of a fresh token + endpoint.
+    /// `respectCooldown: true` throttles the proactive (endpoint-lost) path so it
+    /// cannot spawn a webview on every poll; 401-driven attempts bypass the
+    /// cooldown but are still capped by `RenewalPolicy.maxConsecutiveFailures`.
+    private func attemptSilentRenewal(respectCooldown: Bool) async -> Bool {
+        guard !renewalInFlight,
+              RenewalPolicy.shouldAttempt(consecutiveFailures: consecutiveRenewalFailures),
+              !respectCooldown || RenewalPolicy.cooldownElapsed(since: lastRenewalAttempt),
+              KeychainManager.get(account: "googleToken") != nil else { return false }
+        renewalInFlight = true
+        lastRenewalAttempt = Date()
+        defer { renewalInFlight = false }
+        let ok = await auth.renewSession()
+        consecutiveRenewalFailures = ok ? 0 : consecutiveRenewalFailures + 1
+        print("[UsageTracker] silent session renewal \(ok ? "succeeded" : "failed") (consecutive failures: \(consecutiveRenewalFailures))")
+        return ok
     }
 
     /// Refreshes on the offline → online edge only. Without the `wasOffline`

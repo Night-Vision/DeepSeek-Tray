@@ -12,6 +12,9 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     private var hasPrefilled = false
     private var pendingCompletion: ((Bool) -> Void)?
     private var saved = false
+    /// Silent renewal mode: invisible, no prefill; aborts quietly on sign-in or
+    /// timeout. Used to re-capture a fresh token via the persisted WebKit session.
+    private let silent: Bool
 
     // Intercepts fetch/XHR on the platform site and forwards usage-shaped traffic to Swift.
     private static let interceptorScript = """
@@ -67,11 +70,13 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     })();
     """
 
-    init(siteURL: URL, initialEmail: String? = nil, initialPassword: String? = nil, isHeadless: Bool = false) {
+    init(siteURL: URL, initialEmail: String? = nil, initialPassword: String? = nil, isHeadless: Bool = false, silent: Bool = false) {
         self.siteURL = siteURL
         self.initialEmail = initialEmail
         self.initialPassword = initialPassword
-        self.isHeadless = isHeadless
+        self.silent = silent
+        // Silent renewal must never surface a window.
+        self.isHeadless = silent ? true : isHeadless
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
@@ -127,9 +132,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
             self.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
+            let timeout: TimeInterval = silent ? 25 : 15
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
                 guard let self, !self.saved else { return }
-                print("[WebSSOSheet] Headless sign-in timed out after 15s")
+                print("[WebSSOSheet] \(self.silent ? "Silent renewal timed out after 25s" : "Headless sign-in timed out after 15s")")
                 self.handleDismiss(success: false)
             }
         }
@@ -139,6 +145,14 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("[WebSSOSheet] didFinish: \(webView.url?.absoluteString ?? "?") title: \(webView.title ?? "?")")
+
+        // Silent renewal: landing on the sign-in page means the platform session
+        // is truly dead — give up quietly so the caller falls back to re-login.
+        if silent, let url = webView.url?.absoluteString, url.contains("/sign_in") {
+            print("[WebSSOSheet] silent renewal: redirected to /sign_in — session dead")
+            handleDismiss(success: false)
+            return
+        }
 
         if let url = webView.url?.absoluteString, url.contains("/sign_in"),
            let email = initialEmail, let password = initialPassword,
@@ -259,6 +273,11 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
                 discoveredAt: Date()
             )
         )
+        // Remember the page that fired usage traffic so silent renewal can reload
+        // exactly this page and re-trigger the SPA without user interaction.
+        if let page = webView.url?.absoluteString, !page.isEmpty {
+            UserDefaults.standard.set(page, forKey: "ds_dashboard_page_url")
+        }
         // Endpoint captured = auth succeeded (auth rides in the captured request
         // headers, not a cookie). Close the sheet and let the app poll it.
         handleDismiss(success: true)

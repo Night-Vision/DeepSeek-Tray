@@ -196,5 +196,34 @@ final class UnitTests: XCTestCase {
         XCTAssertEqual(merged.totalTokens, prev.totalTokens)
         XCTAssertEqual(merged.dailyTotals.count, prev.dailyTotals.count)
     }
+
+    // MARK: - Session renewal
+
+    func testRenewalPolicyConsecutiveFailuresGate() {
+        XCTAssertTrue(RenewalPolicy.shouldAttempt(consecutiveFailures: 0))
+        XCTAssertTrue(RenewalPolicy.shouldAttempt(consecutiveFailures: 1))
+        XCTAssertFalse(RenewalPolicy.shouldAttempt(consecutiveFailures: 2))
+        XCTAssertFalse(RenewalPolicy.shouldAttempt(consecutiveFailures: 5))
+    }
+
+    func testRenewalPolicyCooldown() {
+        let now = Date()
+        XCTAssertTrue(RenewalPolicy.cooldownElapsed(since: nil, now: now))
+        XCTAssertTrue(RenewalPolicy.cooldownElapsed(since: now.addingTimeInterval(-301), now: now))
+        XCTAssertFalse(RenewalPolicy.cooldownElapsed(since: now.addingTimeInterval(-60), now: now))
+    }
+
+    func testJWTExpiryDecodesWithoutSignature() {
+        func jwtPart(_ json: String) -> String {
+            Data(json.utf8).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+        let token = jwtPart(#"{"alg":"none"}"#) + "." + jwtPart(#"{"exp":1750000000}"#) + ".sig"
+        XCTAssertEqual(JWT.expiry(of: token), Date(timeIntervalSince1970: 1_750_000_000))
+        XCTAssertNil(JWT.expiry(of: "not-a-jwt"))
+        XCTAssertNil(JWT.expiry(of: jwtPart(#"{"alg":"none"}"#) + "." + jwtPart(#"{"exp":"later"}"#)))
+    }
 }
 

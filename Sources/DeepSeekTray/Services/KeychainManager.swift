@@ -41,12 +41,17 @@ struct KeychainManager {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(account: String) {
+    @discardableResult
+    static func delete(account: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            print("[KeychainManager] delete '\(account)' failed: \(status)")
+        }
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }
