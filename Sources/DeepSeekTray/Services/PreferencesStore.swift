@@ -1,7 +1,7 @@
 import Foundation
 
 enum TrayDisplayStyle: String, CaseIterable, Identifiable {
-    case hourly, monthly, cost, todayCost
+    case hourly, monthly, cost, todayCost, balance
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -9,6 +9,7 @@ enum TrayDisplayStyle: String, CaseIterable, Identifiable {
         case .monthly: return "Window Tokens"
         case .cost: return "Est. Cost"
         case .todayCost: return "Today's Cost"
+        case .balance: return "Balance"
         }
     }
 }

@@ -33,6 +33,24 @@ struct DiscoveredDashboardUsageClient {
     // MARK: - Storage
 
     static func saveEndpoint(_ endpoint: DiscoveredEndpoint) {
+        save(endpoint, to: storageKey)
+    }
+
+    static func loadEndpoint() -> DiscoveredEndpoint? {
+        load(from: storageKey)
+    }
+
+    static let balanceStorageKey = "ds_discovered_balance_endpoint"
+
+    static func saveBalanceEndpoint(_ endpoint: DiscoveredEndpoint) {
+        save(endpoint, to: balanceStorageKey)
+    }
+
+    static func loadBalanceEndpoint() -> DiscoveredEndpoint? {
+        load(from: balanceStorageKey)
+    }
+
+    private static func save(_ endpoint: DiscoveredEndpoint, to key: String) {
         // Security: never persist the live credential — the authorization
         // (Bearer JWT) / cookie headers are re-injected from Keychain at fetch
         // time. Keep only non-secret x-client-* headers.
@@ -46,12 +64,12 @@ struct DiscoveredDashboardUsageClient {
             discoveredAt: endpoint.discoveredAt
         )
         if let data = try? JSONEncoder().encode(sanitized) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
-    static func loadEndpoint() -> DiscoveredEndpoint? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+    private static func load(from key: String) -> DiscoveredEndpoint? {
+        guard let data = UserDefaults.standard.data(forKey: key),
               let endpoint = try? JSONDecoder().decode(DiscoveredEndpoint.self, from: data) else {
             return nil
         }
@@ -141,6 +159,57 @@ struct DiscoveredDashboardUsageClient {
             }
         }
         return (total, currency)
+    }
+
+    /// Platform wallet balance from the balance-shaped endpoint captured at login.
+    /// Schema is undocumented (discovered in Phase 0); this parser tolerates both
+    /// the API-style `balance_infos[]` shape and a flat {balance, currency} body,
+    /// and logs the observed top-level keys until the real shape is confirmed.
+    func fetchBalance() async throws -> (amount: Double, currency: String) {
+        let resolved = endpoint.url.hasPrefix("http") ? endpoint.url : "https://platform.deepseek.com" + endpoint.url
+        guard let url = URL(string: resolved) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = endpoint.method
+        request.timeoutInterval = 10
+        for (name, value) in authHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw DashboardFetchError.resourceUnavailable
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw DashboardFetchError.unauthorized
+        }
+        guard http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let root = json as? [String: Any] else {
+            throw DashboardFetchError.resourceUnavailable
+        }
+        print("[UsageTracker] balance response keys: \(Array(root.keys))")
+
+        // API-style: balance_infos[] at root or under {data}.
+        let dataObj = root["data"] as? [String: Any]
+        let infos = (root["balance_infos"] as? [[String: Any]])
+            ?? (dataObj?["balance_infos"] as? [[String: Any]])
+            ?? []
+        for info in infos {
+            guard let currency = info["currency"] as? String,
+                  let raw = (info["total_balance"] as? String)
+                      ?? (info["totalBalance"] as? NSNumber)?.stringValue,
+                  let amount = Double(raw) else { continue }
+            return (amount, currency)
+        }
+        // Flat shape: {balance/amount: "...", currency: "..."} at root or under data.
+        let container = dataObj ?? root
+        if let currency = container["currency"] as? String,
+           let raw = (container["balance"] as? String) ?? (container["amount"] as? String)
+               ?? (container["balance"] as? NSNumber)?.stringValue
+               ?? (container["amount"] as? NSNumber)?.stringValue,
+           let amount = Double(raw) {
+            return (amount, currency)
+        }
+        throw DashboardFetchError.resourceUnavailable
     }
 
     // MARK: - Parsing (platform schema: data.biz_data.series[].buckets[])

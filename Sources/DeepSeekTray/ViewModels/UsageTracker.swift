@@ -126,6 +126,7 @@ final class UsageTracker: ObservableObject {
         // Best-effort dashboard usage via the discovered endpoint (if any).
         var usage: UsageSnapshot?
         var cost: (cost: Double, currency: String)?
+        var balance: (amount: Double, currency: String)?
         var isUnauthorized = false
         var fetchError: String?
 
@@ -149,6 +150,17 @@ final class UsageTracker: ObservableObject {
             }
         }
 
+        if let balanceEndpoint = DiscoveredDashboardUsageClient.loadBalanceEndpoint() {
+            let client = DiscoveredDashboardUsageClient(endpoint: balanceEndpoint)
+            do {
+                balance = try await client.fetchBalance()
+            } catch DashboardFetchError.unauthorized {
+                isUnauthorized = true
+            } catch {
+                if fetchError == nil { fetchError = error.localizedDescription }
+            }
+        }
+
         // Expired/invalid token: attempt one silent re-capture before the
         // existing sign-out path nukes the session.
         if isUnauthorized, allowRenewalRetry {
@@ -160,7 +172,7 @@ final class UsageTracker: ObservableObject {
             }
         }
 
-        await MainActor.run { [usage, cost, isUnauthorized, fetchError] in
+        await MainActor.run { [usage, cost, balance, isUnauthorized, fetchError] in
             if isUnauthorized {
                 clearRetry()
                 auth.signOut()
@@ -170,10 +182,10 @@ final class UsageTracker: ObservableObject {
                 return
             }
 
-            if usage != nil || cost != nil {
+            if usage != nil || cost != nil || balance != nil {
                 // A real fetch succeeded — the session is healthy again.
                 consecutiveRenewalFailures = 0
-                snapshot = snapshot.applying(usage: usage, cost: cost)
+                snapshot = snapshot.applying(usage: usage, cost: cost, balance: balance)
                 snapshot.lastUpdated = Date()
                 if let cost, cost.cost > 0 {
                     NotificationManager.checkBudget(cost: cost.cost, budget: preferences.monthlyBudget, currencySymbol: currencySymbol(cost.currency))
@@ -280,6 +292,13 @@ final class UsageTracker: ObservableObject {
             let symbol = currencySymbol(snapshot.usageCurrency)
             let today = snapshot.costForWindow(days: 1).amount
             trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", today))/day"
+        case .balance:
+            guard !snapshot.balanceCurrency.isEmpty else {
+                trayLabelText = "\(prefix) --"
+                return
+            }
+            let symbol = currencySymbol(snapshot.balanceCurrency)
+            trayLabelText = "\(prefix) \(symbol)\(String(format: "%.2f", snapshot.balanceAmount))"
         }
     }
 

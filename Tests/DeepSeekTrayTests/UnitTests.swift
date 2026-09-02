@@ -225,5 +225,22 @@ final class UnitTests: XCTestCase {
         XCTAssertNil(JWT.expiry(of: "not-a-jwt"))
         XCTAssertNil(JWT.expiry(of: jwtPart(#"{"alg":"none"}"#) + "." + jwtPart(#"{"exp":"later"}"#)))
     }
+
+    // MARK: - Balance merge
+
+    func testBalanceMergeWritesWhenCurrencyPresent() {
+        let merged = previousSnapshot().applying(usage: nil, cost: nil, balance: (amount: 9.99, currency: "CNY"))
+        XCTAssertEqual(merged.balanceAmount, 9.99, accuracy: 0.0001)
+        XCTAssertEqual(merged.balanceCurrency, "CNY")
+    }
+
+    func testBalanceMergeEmptyCurrencyKeepsPrevious() {
+        var prev = previousSnapshot()
+        prev.balanceAmount = 5
+        prev.balanceCurrency = "USD"
+        let merged = prev.applying(usage: nil, cost: nil, balance: (amount: 0, currency: ""))
+        XCTAssertEqual(merged.balanceAmount, 5, accuracy: 0.0001)
+        XCTAssertEqual(merged.balanceCurrency, "USD")
+    }
 }
 

@@ -252,12 +252,28 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // the /api/v0/usage/* schema. The interceptor never reads bodies, so the
         // gate is the URL pattern + an Authorization header present.
         let lower = url.lowercased()
-        guard lower.contains("/api/v0/usage/"),
-              !lower.contains("cost"), !lower.contains("billing") else { return }
-
         let headers = (dict["headers"] as? [String: Any])?
             .compactMapValues { $0 as? String } ?? [:]
         guard headers.keys.contains(where: { $0.lowercased() == "authorization" }) else { return }
+
+        // Balance-shaped traffic: record the endpoint so the tray can show the
+        // wallet balance — never a dismissal trigger (login ends on the usage
+        // capture below).
+        if lower.contains("balance") {
+            DiscoveredDashboardUsageClient.saveBalanceEndpoint(
+                DiscoveredDashboardUsageClient.DiscoveredEndpoint(
+                    url: url,
+                    method: (dict["method"] as? String) ?? "GET",
+                    headers: headers,
+                    discoveredAt: Date()
+                )
+            )
+            print("[WebSSOSheet] balance endpoint captured: \(url)")
+            return
+        }
+
+        guard lower.contains("/api/v0/usage/"),
+              !lower.contains("cost"), !lower.contains("billing") else { return }
 
         // Persist the fresh Bearer JWT NOW, from the raw capture — the sanitized
         // endpoint saved below no longer carries it (security fix).

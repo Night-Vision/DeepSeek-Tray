@@ -10,6 +10,9 @@ struct UsageSnapshot {
     var dailyTotals: [DailyUsage]
     var keyBreakdown: [KeyUsage]
     var lastUpdated: Date
+    /// Platform wallet balance from the balance endpoint; empty currency = never fetched.
+    var balanceAmount: Double = 0
+    var balanceCurrency: String = ""
 
     /// Proportional cost for `days` derived from official billing totalCost and
     /// token ratio. Returns `(amount, estimated)`:
@@ -41,7 +44,8 @@ struct UsageSnapshot {
     ///   time the cost call fails.
     /// - a `cost` of 0 never overwrites a good cost. Also skips a legitimate $0
     ///   month — the previous value stays until a non-zero bill arrives.
-    func applying(usage: UsageSnapshot?, cost: (cost: Double, currency: String)?) -> UsageSnapshot {
+    func applying(usage: UsageSnapshot?, cost: (cost: Double, currency: String)?,
+                  balance: (amount: Double, currency: String)? = nil) -> UsageSnapshot {
         var merged = self
         if let usage {
             merged.totalRequests = usage.totalRequests
@@ -52,6 +56,10 @@ struct UsageSnapshot {
         if let cost, cost.cost > 0 {
             merged.totalCost = cost.cost
             merged.usageCurrency = cost.currency
+        }
+        if let balance, !balance.currency.isEmpty {
+            merged.balanceAmount = balance.amount
+            merged.balanceCurrency = balance.currency
         }
         return merged
     }
