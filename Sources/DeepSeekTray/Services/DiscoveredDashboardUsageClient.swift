@@ -83,6 +83,11 @@ struct DiscoveredDashboardUsageClient {
     /// non-secret captured headers (x-client-*) that the platform still requires.
     private func authHeaders() -> [String: String] {
         var headers = endpoint.headers
+        // Keep any captured timezone header in step with the live `tz` query
+        // param after a DST transition (both were pinned at sign-in time).
+        for key in headers.keys where key.lowercased() == "x-client-timezone-offset" {
+            headers[key] = String(TimeZone.current.secondsFromGMT(for: Date()))
+        }
         if !headers.keys.contains(where: { $0.lowercased() == "authorization" }),
            let jwt = KeychainManager.get(account: "googleToken") {
             headers["Authorization"] = jwt
@@ -94,8 +99,12 @@ struct DiscoveredDashboardUsageClient {
 
     func fetchUsage(days: Int = 7) async throws -> UsageSnapshot {
         // The interceptor captures relative URLs (e.g. /api/v0/usage/...);
-        // resolve them against the platform host.
-        let resolved = endpoint.url.hasPrefix("http") ? endpoint.url : "https://platform.deepseek.com" + endpoint.url
+        // resolve them against the platform host. The captured URL carries a
+        // hardcoded start/end window frozen at sign-in time — recompute it live
+        // (always a 30-day span, matching the dashboard) so the chart tracks
+        // today instead of replaying the same 30 days forever.
+        let base = endpoint.url.hasPrefix("http") ? endpoint.url : "https://platform.deepseek.com" + endpoint.url
+        let resolved = UsageWindow.live(url: base, days: 30, now: Date(), timeZone: .current)
         guard let url = URL(string: resolved) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method
