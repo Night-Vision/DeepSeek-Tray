@@ -67,6 +67,9 @@ final class AuthManager: ObservableObject {
 
     func signOut() {
         let deleted = KeychainManager.delete(account: "googleToken")
+        // Without this the mirrored cookies would silently restore the account
+        // on the next sign-in, defeating the sign-out entirely.
+        SessionStore.clear()
         // All three discovered keys, not just the usage endpoint: a surviving
         // balance endpoint gets fetched without a token, 401s, and drives this
         // same sign-out path again.

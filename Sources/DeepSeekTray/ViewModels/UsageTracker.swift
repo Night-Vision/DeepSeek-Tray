@@ -2,22 +2,6 @@ import SwiftUI
 import Combine
 import Network
 
-/// Best-effort JWT `exp` read (no signature verification — diagnostics only).
-enum JWT {
-    static func expiry(of token: String) -> Date? {
-        let parts = token.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
-        var b64 = String(parts[1])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        while b64.count % 4 != 0 { b64 += "=" }
-        guard let data = Data(base64Encoded: b64),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let exp = (obj["exp"] as? NSNumber)?.doubleValue else { return nil }
-        return Date(timeIntervalSince1970: exp)
-    }
-}
-
 @MainActor
 final class UsageTracker: ObservableObject {
     static let shared = UsageTracker()
@@ -32,6 +16,9 @@ final class UsageTracker: ObservableObject {
     private var retryTask: Task<Void, Never>?
     private var retryDelay: Double = Backoff.initial
     private var wasOffline = false
+    /// Renew ahead of a 401 once the mirrored session is older than this. The
+    /// token is opaque so there is no exp to read; this is a tunable guess.
+    private static let sessionMaxAge: TimeInterval = 12 * 3600
     private var renewalInFlight = false
     private var lastRenewalAttempt: Date?
     private var consecutiveRenewalFailures = 0
@@ -51,14 +38,10 @@ final class UsageTracker: ObservableObject {
 
         // Launch diagnostics: the half-a-session state (token without endpoint)
         // is the "Linked but data never updates" bug; log it if present.
-        if let jwt = KeychainManager.get(account: "googleToken") {
+        if KeychainManager.get(account: "googleToken") != nil {
             let hasEndpoint = DiscoveredDashboardUsageClient.loadEndpoint() != nil
-            print("[UsageTracker] launch state: token present, endpoint \(hasEndpoint ? "present" : "MISSING")")
-            if let exp = JWT.expiry(of: jwt) {
-                let left = exp.timeIntervalSinceNow
-                let text = left > 0 ? "expires in \(max(1, Int(left / 3600)))h" : "expired \(max(1, Int(-left / 3600)))h ago"
-                print("[UsageTracker] googleToken \(text) (\(exp))")
-            }
+            let age = SessionStore.lastSuccessfulAuth.map { "\(Int(-$0.timeIntervalSinceNow / 3600))h old" } ?? "unknown age"
+            print("[UsageTracker] launch state: token present, endpoint \(hasEndpoint ? "present" : "MISSING"), session \(age)")
         }
 
         preferences.$refreshInterval
@@ -80,6 +63,13 @@ final class UsageTracker: ObservableObject {
 
         startPolling(interval: preferences.refreshInterval)
         startPathMonitor()
+        // Apple's docs are explicit: this must be NSWorkspace's own notification
+        // centre. Registering on NotificationCenter.default silently never fires.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
         // Fetch immediately at launch — the poll timer only fires after the
         // first refreshInterval elapses, leaving the dashboard blank until then.
         Task { @MainActor [weak self] in
@@ -103,6 +93,12 @@ final class UsageTracker: ObservableObject {
         if DiscoveredDashboardUsageClient.loadEndpoint() == nil,
            KeychainManager.get(account: "googleToken") != nil {
             print("[UsageTracker] token present but endpoint missing — attempting silent session renewal")
+            _ = await attemptSilentRenewal(respectCooldown: true)
+        } else if let last = SessionStore.lastSuccessfulAuth,
+                  -last.timeIntervalSinceNow > Self.sessionMaxAge,
+                  KeychainManager.get(account: "googleToken") != nil {
+            // Renew ahead of expiry so a 401 never reaches the UI as a stale state.
+            print("[UsageTracker] session older than \(Int(Self.sessionMaxAge / 3600))h — renewing proactively")
             _ = await attemptSilentRenewal(respectCooldown: true)
         }
 

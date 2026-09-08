@@ -131,7 +131,14 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     func start(completion: @escaping (Bool) -> Void) {
         self.pendingCompletion = completion
         let request = URLRequest(url: siteURL)
-        webView.load(request)
+        // Put any Keychain-mirrored session back before loading: on a bundle
+        // identity whose own cookie jar is empty (bare binary vs packaged .app)
+        // this is what makes silent renewal possible at all.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await SessionStore.restore(into: self.webView.configuration.websiteDataStore.httpCookieStore)
+            self.webView.load(request)
+        }
         if !isHeadless {
             self.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -284,6 +291,13 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // endpoint saved below no longer carries it (security fix).
         for (name, value) in headers where name.lowercased() == "authorization" {
             _ = KeychainManager.save(account: "googleToken", value: value)
+        }
+
+        // Mirror the cookies that back this token into the Keychain, which is the
+        // only store not keyed by bundle identity.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await SessionStore.capture(from: self.webView.configuration.websiteDataStore.httpCookieStore)
         }
 
         DiscoveredDashboardUsageClient.saveEndpoint(
