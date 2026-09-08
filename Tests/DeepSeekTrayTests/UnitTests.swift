@@ -242,5 +242,38 @@ final class UnitTests: XCTestCase {
         XCTAssertEqual(merged.balanceAmount, 5, accuracy: 0.0001)
         XCTAssertEqual(merged.balanceCurrency, "USD")
     }
-}
 
+    // MARK: - Session renewal policy
+
+    /// The lockout regression: renewal must survive an arbitrarily long outage.
+    /// Previously two timeouts spent the budget permanently, because the counter
+    /// only reset on a success that could no longer happen.
+    func testInconclusiveOutcomesNeverSpendTheBudget() {
+        var n = 0
+        for _ in 0..<1000 { n = RenewalPolicy.nextFailureCount(n, after: .inconclusive) }
+        XCTAssertEqual(n, 0)
+        XCTAssertTrue(RenewalPolicy.shouldAttempt(consecutiveFailures: n))
+    }
+
+    func testAuthoritativeDeadSessionStopsAfterMax() {
+        var d = 0
+        d = RenewalPolicy.nextFailureCount(d, after: .sessionDead)
+        XCTAssertTrue(RenewalPolicy.shouldAttempt(consecutiveFailures: d))
+        d = RenewalPolicy.nextFailureCount(d, after: .sessionDead)
+        XCTAssertEqual(d, RenewalPolicy.maxConsecutiveFailures)
+        XCTAssertFalse(RenewalPolicy.shouldAttempt(consecutiveFailures: d))
+    }
+
+    func testNoiseAroundRealVerdictDoesNotAccelerateLockout() {
+        var m = 0
+        for o in [RenewalOutcome.inconclusive, .sessionDead, .inconclusive, .inconclusive] {
+            m = RenewalPolicy.nextFailureCount(m, after: o)
+        }
+        XCTAssertEqual(m, 1)
+        XCTAssertTrue(RenewalPolicy.shouldAttempt(consecutiveFailures: m))
+    }
+
+    func testRenewedResetsFailureCount() {
+        XCTAssertEqual(RenewalPolicy.nextFailureCount(1, after: .renewed), 0)
+    }
+}

@@ -15,6 +15,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     /// Silent renewal mode: invisible, no prefill; aborts quietly on sign-in or
     /// timeout. Used to re-capture a fresh token via the persisted WebKit session.
     private let silent: Bool
+    /// Set only when the platform redirected to /sign_in during a silent renewal:
+    /// the one signal that authoritatively means the cookie session is gone.
+    /// Everything else (timeout, offline) leaves this false — "could not tell".
+    private(set) var didDetectDeadSession = false
 
     // Intercepts fetch/XHR on the platform site and forwards usage-shaped traffic to Swift.
     private static let interceptorScript = """
@@ -127,7 +131,14 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     func start(completion: @escaping (Bool) -> Void) {
         self.pendingCompletion = completion
         let request = URLRequest(url: siteURL)
-        webView.load(request)
+        // Put any Keychain-mirrored session back before loading: on a bundle
+        // identity whose own cookie jar is empty (bare binary vs packaged .app)
+        // this is what makes silent renewal possible at all.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await SessionStore.restore(into: self.webView.configuration.websiteDataStore.httpCookieStore)
+            self.webView.load(request)
+        }
         if !isHeadless {
             self.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -150,6 +161,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // is truly dead — give up quietly so the caller falls back to re-login.
         if silent, let url = webView.url?.absoluteString, url.contains("/sign_in") {
             print("[WebSSOSheet] silent renewal: redirected to /sign_in — session dead")
+            didDetectDeadSession = true
             handleDismiss(success: false)
             return
         }
@@ -279,6 +291,13 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // endpoint saved below no longer carries it (security fix).
         for (name, value) in headers where name.lowercased() == "authorization" {
             _ = KeychainManager.save(account: "googleToken", value: value)
+        }
+
+        // Mirror the cookies that back this token into the Keychain, which is the
+        // only store not keyed by bundle identity.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await SessionStore.capture(from: self.webView.configuration.websiteDataStore.httpCookieStore)
         }
 
         DiscoveredDashboardUsageClient.saveEndpoint(
