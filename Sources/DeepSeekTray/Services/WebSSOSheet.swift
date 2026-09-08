@@ -15,6 +15,10 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     /// Silent renewal mode: invisible, no prefill; aborts quietly on sign-in or
     /// timeout. Used to re-capture a fresh token via the persisted WebKit session.
     private let silent: Bool
+    /// Set only when the platform redirected to /sign_in during a silent renewal:
+    /// the one signal that authoritatively means the cookie session is gone.
+    /// Everything else (timeout, offline) leaves this false — "could not tell".
+    private(set) var didDetectDeadSession = false
 
     // Intercepts fetch/XHR on the platform site and forwards usage-shaped traffic to Swift.
     private static let interceptorScript = """
@@ -150,6 +154,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         // is truly dead — give up quietly so the caller falls back to re-login.
         if silent, let url = webView.url?.absoluteString, url.contains("/sign_in") {
             print("[WebSSOSheet] silent renewal: redirected to /sign_in — session dead")
+            didDetectDeadSession = true
             handleDismiss(success: false)
             return
         }

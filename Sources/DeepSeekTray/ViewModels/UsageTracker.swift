@@ -2,23 +2,6 @@ import SwiftUI
 import Combine
 import Network
 
-/// When to attempt a silent session renewal and how often (webview churn guard).
-enum RenewalPolicy {
-    /// Minimum gap between *proactive* (endpoint-lost) renewal attempts.
-    static let cooldown: TimeInterval = 300
-    /// Consecutive failures before falling back to an interactive sign-in.
-    static let maxConsecutiveFailures = 2
-
-    static func shouldAttempt(consecutiveFailures: Int) -> Bool {
-        consecutiveFailures < maxConsecutiveFailures
-    }
-
-    static func cooldownElapsed(since lastAttempt: Date?, now: Date = Date()) -> Bool {
-        guard let lastAttempt else { return true }
-        return now.timeIntervalSince(lastAttempt) >= cooldown
-    }
-}
-
 /// Best-effort JWT `exp` read (no signature verification — diagnostics only).
 enum JWT {
     static func expiry(of token: String) -> Date? {
@@ -163,17 +146,27 @@ final class UsageTracker: ObservableObject {
 
         // Expired/invalid token: attempt one silent re-capture before the
         // existing sign-out path nukes the session.
+        // A 401 alone is not grounds for sign-out: the token may be expired while
+        // the cookie session behind it is still perfectly good.
+        var signOutOnUnauthorized = isUnauthorized
         if isUnauthorized, allowRenewalRetry {
-            let renewed = await attemptSilentRenewal(respectCooldown: false)
-            if renewed {
+            switch await attemptSilentRenewal(respectCooldown: false) {
+            case .renewed:
                 print("[UsageTracker] session renewed after 401 — refreshing once more")
                 await refreshOnce(allowRenewalRetry: false)
                 return
+            case .inconclusive:
+                // Couldn't tell (offline/timeout). Keep the token and let the
+                // existing backoff + NWPathMonitor retry rather than burning it.
+                print("[UsageTracker] renewal inconclusive after 401 — keeping session, will retry")
+                signOutOnUnauthorized = false
+            case .sessionDead:
+                break
             }
         }
 
-        await MainActor.run { [usage, cost, balance, isUnauthorized, fetchError] in
-            if isUnauthorized {
+        await MainActor.run { [usage, cost, balance, signOutOnUnauthorized, isUnauthorized, fetchError] in
+            if signOutOnUnauthorized {
                 clearRetry()
                 auth.signOut()
                 if !auth.state.googleSessionLinked {
@@ -195,10 +188,13 @@ final class UsageTracker: ObservableObject {
             // Assigned unconditionally: keying this off "did anything succeed"
             // swallowed the error whenever one of the two calls failed and the
             // other did not, leaving stale data looking fresh.
-            lastError = fetchError
+            // A held 401 (renewal inconclusive) sets no fetchError, so without
+            // this the UI would show stale numbers behind a healthy green dot.
+            let heldUnauthorized = isUnauthorized && !signOutOnUnauthorized
+            lastError = fetchError ?? (heldUnauthorized ? "Session needs renewing — retrying in the background." : nil)
             if let fetchError { print("[UsageTracker] fetch failed: \(fetchError)") }
 
-            if fetchError == nil { clearRetry() } else { scheduleRetry() }
+            if fetchError == nil && !heldUnauthorized { clearRetry() } else { scheduleRetry() }
 
             if !auth.state.googleSessionLinked {
                 currentView = .auth
@@ -241,18 +237,23 @@ final class UsageTracker: ObservableObject {
     /// `respectCooldown: true` throttles the proactive (endpoint-lost) path so it
     /// cannot spawn a webview on every poll; 401-driven attempts bypass the
     /// cooldown but are still capped by `RenewalPolicy.maxConsecutiveFailures`.
-    private func attemptSilentRenewal(respectCooldown: Bool) async -> Bool {
+    private func attemptSilentRenewal(respectCooldown: Bool) async -> RenewalOutcome {
+        // Budget exhausted by authoritative verdicts: the session really is gone.
+        guard RenewalPolicy.shouldAttempt(consecutiveFailures: consecutiveRenewalFailures) else {
+            return .sessionDead
+        }
+        // No network: a renewal here can only time out and would tell us nothing.
+        guard !wasOffline else { return .inconclusive }
         guard !renewalInFlight,
-              RenewalPolicy.shouldAttempt(consecutiveFailures: consecutiveRenewalFailures),
               !respectCooldown || RenewalPolicy.cooldownElapsed(since: lastRenewalAttempt),
-              KeychainManager.get(account: "googleToken") != nil else { return false }
+              KeychainManager.get(account: "googleToken") != nil else { return .inconclusive }
         renewalInFlight = true
         lastRenewalAttempt = Date()
         defer { renewalInFlight = false }
-        let ok = await auth.renewSession()
-        consecutiveRenewalFailures = ok ? 0 : consecutiveRenewalFailures + 1
-        print("[UsageTracker] silent session renewal \(ok ? "succeeded" : "failed") (consecutive failures: \(consecutiveRenewalFailures))")
-        return ok
+        let outcome = await auth.renewSession()
+        consecutiveRenewalFailures = RenewalPolicy.nextFailureCount(consecutiveRenewalFailures, after: outcome)
+        print("[UsageTracker] silent session renewal: \(outcome) (consecutive dead-session verdicts: \(consecutiveRenewalFailures))")
+        return outcome
     }
 
     /// Refreshes on the offline → online edge only. Without the `wasOffline`
