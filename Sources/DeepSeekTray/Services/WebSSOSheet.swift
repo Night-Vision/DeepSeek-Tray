@@ -404,6 +404,9 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         pendingCompletion = nil
 
         // Break script message handler & retain cycle before window teardown on @MainActor
+        // The prefill script embeds the password literal: drop it with the sheet
+        // rather than leaving it in the web view configuration's lifetime.
+        contentController?.removeAllUserScripts()
         contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
         contentController = nil
 

@@ -187,37 +187,157 @@ struct BudgetRow: View {
 
 struct ExportRow: View {
     @EnvironmentObject var tracker: UsageTracker
-    @ObservedObject private var prefs = PreferencesStore.shared
+
+    @State private var preset: ExportPreset = .last30
+    @State private var customStart = Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date()
+    @State private var customEnd = Date()
+    @State private var isExporting = false
+    @State private var exportError: String?
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Export Usage Data")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.dsTextPrimary)
-                Text("Save the current \(prefs.extendedViewStyle.days)-day window; cost is estimated")
+        VStack(spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Export Usage Data")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.dsTextPrimary)
+                    Text(rangeHint)
+                        .font(.system(size: 9))
+                        .foregroundColor(.dsTextTertiary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Button("CSV") { export(ext: "csv") }
+                        .buttonStyle(SmallPillButtonStyle())
+                    Button("JSON") { export(ext: "json") }
+                        .buttonStyle(SmallPillButtonStyle())
+                }
+                .disabled(isExporting)
+            }
+
+            HStack(spacing: 6) {
+                Text("Export range")
                     .font(.system(size: 9))
                     .foregroundColor(.dsTextTertiary)
+                    .frame(width: 70, alignment: .leading)
+                Picker("", selection: $preset) {
+                    ForEach(ExportPreset.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 160)
+
+                if isExporting {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 16, height: 16)
+                }
+                Spacer()
             }
-            Spacer()
-            HStack(spacing: 6) {
-                Button("CSV") { exportCSV() }
-                    .buttonStyle(SmallPillButtonStyle())
-                Button("JSON") { exportJSON() }
-                    .buttonStyle(SmallPillButtonStyle())
+
+            Text(rangeSummary)
+                .font(.system(size: 9))
+                .foregroundColor(.dsTextTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 70)
+
+            if preset == .custom {
+                HStack(spacing: 6) {
+                    // .field, not a pop-up calendar: the popover is transient, so a
+                    // calendar in its own window would dismiss this panel.
+                    DatePicker("", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+                        .datePickerStyle(.field)
+                        .labelsHidden()
+                    Text("to")
+                        .font(.system(size: 9))
+                        .foregroundColor(.dsTextTertiary)
+                    DatePicker("", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+                        .datePickerStyle(.field)
+                        .labelsHidden()
+                    Spacer()
+                }
+            }
+
+            if let exportError {
+                Text(exportError)
+                    .font(.system(size: 9))
+                    .foregroundColor(.dsAccentAmber)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, 8)
     }
 
-    private func exportCSV() {
-        let data = Data(UsageExporter.csv(tracker.snapshot).utf8)
-        save(data, name: UsageExporter.suggestedFilename(ext: "csv"), type: .commaSeparatedText)
+    /// What the current choice resolves to, on the platform's own UTC day grid —
+    /// shown so the user can see the window before writing a file.
+    private var resolvedRange: DateRange {
+        preset.resolve(customStart: customStart, customEnd: customEnd)
     }
 
-    private func exportJSON() {
-        guard let data = try? UsageExporter.json(tracker.snapshot, windowDays: prefs.extendedViewStyle.days) else { return }
-        save(data, name: UsageExporter.suggestedFilename(ext: "json"), type: .json)
+    private var rangeSummary: String {
+        let range = resolvedRange
+        let lastDay = ExportCalendar.utc.date(byAdding: .day, value: -1, to: range.end) ?? range.start
+        let days = range.dayCount
+        return "\(Self.dayStamp.string(from: range.start)) → \(Self.dayStamp.string(from: lastDay)) · \(days) day\(days == 1 ? "" : "s")"
+    }
+
+    /// Whether the choice falls outside the 30-day window already loaded — said up
+    /// front, so a fetch and its spinner are expected rather than mysterious.
+    private var needsFetch: Bool {
+        let loaded = DateRange.trailing(days: UsageExportService.loadedWindowDays,
+                                        now: tracker.snapshot.lastUpdated,
+                                        calendar: .current)
+        if case .fetch = ExportSource.plan(range: resolvedRange, loadedWindow: loaded, calendar: ExportCalendar.utc) {
+            return true
+        }
+        return false
+    }
+
+    private var rangeHint: String {
+        needsFetch
+            ? "Fetches this range from DeepSeek; cost is estimated"
+            : "Served from the loaded window; cost is estimated"
+    }
+
+    private static let dayStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    /// Fetches (if the range is outside the loaded window), encodes, then opens the
+    /// save panel. Everything is prepared before the panel opens: the popover is
+    /// `.transient` and drops the moment focus leaves.
+    private func export(ext: String) {
+        exportError = nil
+        isExporting = true
+        Task { @MainActor in
+            do {
+                let bundle = try await UsageExportService.shared.bundle(
+                    for: preset,
+                    customStart: customStart,
+                    customEnd: customEnd,
+                    loaded: tracker.snapshot
+                )
+                let data: Data
+                let type: UTType
+                if ext == "csv" {
+                    data = Data(UsageExporter.csv(bundle).utf8)
+                    type = .commaSeparatedText
+                } else {
+                    data = try UsageExporter.json(bundle)
+                    type = .json
+                }
+                isExporting = false
+                save(data, name: UsageExporter.suggestedFilename(bundle, ext: ext), type: type)
+            } catch {
+                isExporting = false
+                exportError = URLErrorPresenter.shortSummary(for: error.localizedDescription)
+            }
+        }
     }
 
     /// Data is encoded before the panel opens: the popover is `.transient` and
@@ -233,6 +353,7 @@ struct ExportRow: View {
         try? data.write(to: url)
     }
 }
+
 
 struct SmallPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
