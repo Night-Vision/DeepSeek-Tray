@@ -10,6 +10,18 @@ enum UsageWindow {
     /// returned byte-identical (schema-drift guard). `now`/`timeZone` are
     /// parameters purely so the behaviour is deterministic to verify.
     static func live(url: String, days: Int, now: Date, timeZone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
+            return url
+        }
+        let start = end.addingTimeInterval(-Double(days) * 86_400)
+        return live(url: url, from: start, to: end, timeZone: timeZone)
+    }
+
+    /// The same rewrite for an explicit window — what an export of a chosen date
+    /// range needs. `to` is exclusive, matching the platform's `end` item.
+    static func live(url: String, from: Date, to: Date, timeZone: TimeZone) -> String {
         guard var components = URLComponents(string: url),
               var items = components.queryItems,
               items.contains(where: { $0.name == "start" }),
@@ -17,18 +29,15 @@ enum UsageWindow {
             return url
         }
 
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
-            return url
-        }
-        let start = end.addingTimeInterval(-Double(days) * 86_400)
-        let tz = timeZone.secondsFromGMT(for: now)
+        // Offset at the last included day, so the server's day boundaries match
+        // the day the user is actually looking at (and a DST change mid-window
+        // does not shift the whole range).
+        let tz = timeZone.secondsFromGMT(for: to.addingTimeInterval(-1))
 
         for i in items.indices {
             switch items[i].name {
-            case "start": items[i].value = String(Int(start.timeIntervalSince1970))
-            case "end": items[i].value = String(Int(end.timeIntervalSince1970))
+            case "start": items[i].value = String(Int(from.timeIntervalSince1970))
+            case "end": items[i].value = String(Int(to.timeIntervalSince1970))
             case "tz": items[i].value = String(tz)
             default: break
             }

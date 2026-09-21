@@ -9,7 +9,9 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     private let initialEmail: String?
     private let initialPassword: String?
     private var isHeadless: Bool
-    private var hasPrefilled = false
+    /// Set when the automated fill hands sign-in back to the user: the headless
+    /// timeout must then stop chasing the sheet closed underneath them.
+    private var awaitingManualLogin = false
     private var pendingCompletion: ((Bool) -> Void)?
     private var saved = false
     /// Silent renewal mode: invisible, no prefill; aborts quietly on sign-in or
@@ -74,6 +76,70 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     })();
     """
 
+    /// Fills the portal sign-in form and submits it.
+    ///
+    /// Injected at document end and self-retrying on purpose: didFinish fires for
+    /// the AWS WAF challenge page and again for the SPA shell, both before the
+    /// login form exists, so a one-shot Swift-side attempt always ran against an
+    /// empty DOM and then latched itself off.
+    ///
+    /// Values go through the native `HTMLInputElement.value` setter. The
+    /// platform's fields are framework-controlled, so a plain `el.value = x`
+    /// leaves the component state empty — the SPA then reports "client validation
+    /// failed" and clears the field without ever sending a login request.
+    private static func prefillScript(email: String, password: String) -> String {
+        let jsonEmail = (try? String(data: JSONEncoder().encode(email), encoding: .utf8)) ?? "\"\""
+        let jsonPassword = (try? String(data: JSONEncoder().encode(password), encoding: .utf8)) ?? "\"\""
+        return """
+        (function() {
+            if (window.__dsPrefillInstalled) return;
+            // Only the sign-in page: this script is re-injected on every main
+            // frame load, and the post-login dashboard must not be polled.
+            if (location.href.indexOf('/sign_in') === -1) return;
+            window.__dsPrefillInstalled = true;
+            const EMAIL = \(jsonEmail);
+            const PW = \(jsonPassword);
+            const POST = (payload) => {
+                if (window.webkit?.messageHandlers?.networkInterceptor) {
+                    window.webkit.messageHandlers.networkInterceptor.postMessage(payload);
+                }
+            };
+            // Never match the cookie-consent banner: its "Accept all cookies"
+            // control has the same primary-button shape as "Log in".
+            const control = (re) => [...document.querySelectorAll('[role="button"], button')]
+                .filter(el => !el.closest('[class*="cookie"]'))
+                .find(el => re.test((el.innerText || '').trim()));
+            const setNative = (el, value) => {
+                Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, value);
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            let tries = 0;
+            (function tick() {
+                const account = document.querySelector('input[type="text"]');
+                const secret = document.querySelector('input[type="password"]');
+                if (account && secret) {
+                    if (account.value !== EMAIL) setNative(account, EMAIL);
+                    if (secret.value !== PW) setNative(secret, PW);
+                    if (account.value === EMAIL && secret.value === PW) {
+                        POST({ type: 'prefill', ok: true });
+                        const consent = control(/^accept all cookies$/i);
+                        if (consent) consent.click();
+                        setTimeout(() => { const login = control(/^log ?in$/i); if (login) login.click(); }, 300);
+                        return;
+                    }
+                }
+                if (++tries > 60) {
+                    POST({ type: 'prefill', ok: false,
+                           reason: (account && secret) ? 'value-rejected' : 'form-not-found' });
+                    return;
+                }
+                setTimeout(tick, 500);
+            })();
+        })();
+        """
+    }
+
     init(siteURL: URL, initialEmail: String? = nil, initialPassword: String? = nil, isHeadless: Bool = false, silent: Bool = false) {
         self.siteURL = siteURL
         self.initialEmail = initialEmail
@@ -91,6 +157,18 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
                          injectionTime: .atDocumentStart,
                          forMainFrameOnly: false)
         )
+        // Sign-in prefill is DOM work, so it is injected at document end and
+        // waits for the SPA itself: the AWS WAF challenge and SPA hydration both
+        // finish loading before the login form exists. Only the credentialed
+        // portal flow gets it — the visible/Google path is untouched.
+        if let email = initialEmail, let password = initialPassword,
+           !email.isEmpty, !password.isEmpty {
+            userContentController.addUserScript(
+                WKUserScript(source: Self.prefillScript(email: email, password: password),
+                             injectionTime: .atDocumentEnd,
+                             forMainFrameOnly: true)
+            )
+        }
         config.userContentController = userContentController
 
         let frame = NSRect(x: 0, y: 0, width: 480, height: 640)
@@ -145,7 +223,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         } else {
             let timeout: TimeInterval = silent ? 25 : 15
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-                guard let self, !self.saved else { return }
+                guard let self, !self.saved, !self.awaitingManualLogin else { return }
                 print("[WebSSOSheet] \(self.silent ? "Silent renewal timed out after 25s" : "Headless sign-in timed out after 15s")")
                 self.handleDismiss(success: false)
             }
@@ -166,36 +244,7 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
             return
         }
 
-        if let url = webView.url?.absoluteString, url.contains("/sign_in"),
-           let email = initialEmail, let password = initialPassword,
-           !email.isEmpty, !password.isEmpty, !hasPrefilled {
-            hasPrefilled = true
-            let escapedEmail = (try? String(data: JSONEncoder().encode(email), encoding: .utf8)) ?? "\"\""
-            let escapedPassword = (try? String(data: JSONEncoder().encode(password), encoding: .utf8)) ?? "\"\""
-            let script = """
-            (function() {
-                const e = document.querySelector('input[type="email"], input[name="email"], input[type="text"], input[autocomplete="username"]');
-                const p = document.querySelector('input[type="password"], input[name="password"], input[autocomplete="current-password"]');
-                if (e && p) {
-                    e.value = \(escapedEmail);
-                    p.value = \(escapedPassword);
-                    e.dispatchEvent(new Event('input', { bubbles: true }));
-                    p.dispatchEvent(new Event('input', { bubbles: true }));
-                    e.dispatchEvent(new Event('change', { bubbles: true }));
-                    p.dispatchEvent(new Event('change', { bubbles: true }));
-                    setTimeout(() => {
-                        const btn = document.querySelector('button[type="submit"], button.ds-button--primary, form button');
-                        if (btn) btn.click();
-                    }, 200);
-                }
-            })();
-            """
-            webView.evaluateJavaScript(script) { [weak self] _, _ in
-                if self?.isHeadless == true {
-                    self?.scheduleCaptchaCheck()
-                }
-            }
-        }
+        // The prefill runs from an injected document-end script instead.
 
         // Diagnostics only: on any post-login platform page, dump the SPA state
         // 10s later so stuck spinner/error screens are visible in the log.
@@ -204,6 +253,18 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
               let url = webView.url?.absoluteString,
               !url.contains("/sign_in") else { return }
         schedulePageStateProbe()
+    }
+
+    /// Automated fill could not complete — the platform changed its markup, or
+    /// it refused scripted values. Show the window so the user finishes by hand
+    /// rather than watching a silent timeout.
+    private func revealForManualLogin() {
+        guard isHeadless, !saved else { return }
+        awaitingManualLogin = true
+        isHeadless = false
+        alphaValue = 1.0
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func scheduleCaptchaCheck() {
@@ -257,8 +318,22 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
         guard message.name == "networkInterceptor",
-              let dict = message.body as? [String: Any],
-              let url = dict["url"] as? String else { return }
+              let dict = message.body as? [String: Any] else { return }
+
+        // Prefill outcome, not network traffic: either the form was filled and
+        // submitted for us, or it never showed up / the platform refused the
+        // values — then hand sign-in back to the user instead of timing out.
+        if dict["type"] as? String == "prefill" {
+            if dict["ok"] as? Bool == true {
+                scheduleCaptchaCheck()
+            } else {
+                print("[WebSSOSheet] prefill gave up (\(dict["reason"] as? String ?? "unknown")) — revealing window for manual sign-in")
+                revealForManualLogin()
+            }
+            return
+        }
+
+        guard let url = dict["url"] as? String else { return }
 
         // Header-only detection: auth is a Bearer JWT, and the usage endpoint is
         // the /api/v0/usage/* schema. The interceptor never reads bodies, so the
@@ -329,6 +404,9 @@ final class WebSSOSheet: NSWindow, WKNavigationDelegate, WKScriptMessageHandler 
         pendingCompletion = nil
 
         // Break script message handler & retain cycle before window teardown on @MainActor
+        // The prefill script embeds the password literal: drop it with the sheet
+        // rather than leaving it in the web view configuration's lifetime.
+        contentController?.removeAllUserScripts()
         contentController?.removeScriptMessageHandler(forName: "networkInterceptor")
         contentController = nil
 

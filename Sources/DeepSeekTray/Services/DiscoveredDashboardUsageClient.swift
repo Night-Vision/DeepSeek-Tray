@@ -26,6 +26,19 @@ struct DiscoveredDashboardUsageClient {
         let discoveredAt: Date
     }
 
+    /// Never the shared session: these responses carry token totals and API-key
+    /// names, and `URLSession.shared` persists every cacheable response under
+    /// `~/Library/Caches/<bundle-id>/` in the clear. Nothing reads them back —
+    /// the URL changes with every computed window — so the cache is pure leak.
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.httpCookieStorage = nil
+        config.timeoutIntervalForRequest = 10
+        return URLSession(configuration: config)
+    }()
+
     static let storageKey = "ds_discovered_usage_endpoint"
 
     let endpoint: DiscoveredEndpoint
@@ -97,14 +110,18 @@ struct DiscoveredDashboardUsageClient {
 
     // MARK: - Fetch
 
-    func fetchUsage(days: Int = 7) async throws -> UsageSnapshot {
+    /// Replays the captured endpoint for an explicit window. `aggregateDays == nil`
+    /// keeps every day the platform returned — what an export of a chosen range
+    /// wants — while the dashboard asks for a 30-day window and keeps the
+    /// trailing 7 or 30.
+    func fetchUsage(window: DateRange, aggregateDays: Int?) async throws -> UsageSnapshot {
         // The interceptor captures relative URLs (e.g. /api/v0/usage/...);
         // resolve them against the platform host. The captured URL carries a
-        // hardcoded start/end window frozen at sign-in time — recompute it live
-        // (always a 30-day span, matching the dashboard) so the chart tracks
-        // today instead of replaying the same 30 days forever.
+        // hardcoded start/end window frozen at sign-in time — recompute it for
+        // the window we actually want, so the data tracks the requested days
+        // instead of replaying the same span forever.
         let base = endpoint.url.hasPrefix("http") ? endpoint.url : "https://platform.deepseek.com" + endpoint.url
-        let resolved = UsageWindow.live(url: base, days: 30, now: Date(), timeZone: .current)
+        let resolved = UsageWindow.live(url: base, from: window.start, to: window.end, timeZone: .current)
         guard let url = URL(string: resolved) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method
@@ -112,7 +129,7 @@ struct DiscoveredDashboardUsageClient {
         for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw DashboardFetchError.resourceUnavailable
         }
@@ -122,16 +139,24 @@ struct DiscoveredDashboardUsageClient {
         guard http.statusCode == 200 else {
             throw DashboardFetchError.resourceUnavailable
         }
-        return try parseUsage(data, days: days)
+        return try parseUsage(data, aggregateDays: aggregateDays)
+    }
+
+    /// The dashboard's call: a 30-day request, aggregated down to `days`.
+    func fetchUsage(days: Int = 7) async throws -> UsageSnapshot {
+        let window = DateRange.trailing(days: 30, now: Date(), calendar: .current)
+        return try await fetchUsage(window: window, aggregateDays: days)
     }
 
     /// Monthly spend in dollars from the platform's billing API:
     /// /api/v0/usage/cost?month=M&year=Y — returns biz_data[].total[].usage[]
     /// with {type, amount} strings + a currency field.
-    func fetchCost() async throws -> (cost: Double, currency: String) {
+    /// Month-granular by nature of the billing API, so an export that crosses a
+    /// boundary asks once per covered month.
+    func fetchCost(month: Int? = nil, year: Int? = nil) async throws -> (cost: Double, currency: String) {
         let calendar = Calendar.current
-        let month = calendar.component(.month, from: Date())
-        let year = calendar.component(.year, from: Date())
+        let month = month ?? calendar.component(.month, from: Date())
+        let year = year ?? calendar.component(.year, from: Date())
         guard let url = URL(string: "https://platform.deepseek.com/api/v0/usage/cost?month=\(month)&year=\(year)") else {
             throw URLError(.badURL)
         }
@@ -141,7 +166,7 @@ struct DiscoveredDashboardUsageClient {
         for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw DashboardFetchError.resourceUnavailable
         }
@@ -183,7 +208,7 @@ struct DiscoveredDashboardUsageClient {
         for (name, value) in authHeaders() {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw DashboardFetchError.resourceUnavailable
         }
@@ -223,7 +248,7 @@ struct DiscoveredDashboardUsageClient {
 
     // MARK: - Parsing (platform schema: data.biz_data.series[].buckets[])
 
-    func parseUsage(_ data: Data, days: Int = 7) throws -> UsageSnapshot {
+    func parseUsage(_ data: Data, aggregateDays: Int? = nil) throws -> UsageSnapshot {
         guard let json = try? JSONSerialization.jsonObject(with: data),
               let root = json as? [String: Any],
               let dataObj = root["data"] as? [String: Any],
@@ -271,8 +296,10 @@ struct DiscoveredDashboardUsageClient {
                 return DailyUsage(date: day.key, totalTokens: day.value.tokens, totalCost: 0, totalRequests: day.value.requests, breakdown: breakdown)
             }
 
-        // Rolling window totals for StatCards and key breakdown based on configured days (7 vs 30).
-        let windowDays = Array(snapshot.dailyTotals.suffix(days))
+        // Rolling window totals for the StatCards and key breakdown. The dashboard
+        // trims to its 7/30-day view; an export (aggregateDays == nil) keeps every
+        // day the platform returned.
+        let windowDays = aggregateDays.map { Array(snapshot.dailyTotals.suffix($0)) } ?? snapshot.dailyTotals
         let windowDates = Set(windowDays.map { $0.date })
         snapshot.totalTokens = windowDays.reduce(0) { $0 + $1.totalTokens }
         snapshot.totalRequests = windowDays.reduce(0) { $0 + $1.totalRequests }

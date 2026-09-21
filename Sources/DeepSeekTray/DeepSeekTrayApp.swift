@@ -7,6 +7,8 @@ struct DeepSeekTrayApp: App {
 
     init() {
         NSApp.setActivationPolicy(.accessory)
+        // One-shot: clear response bodies cached by builds that used URLSession.shared.
+        HTTPCachePurger.purgeIfNeeded()
     }
 
     var body: some Scene {

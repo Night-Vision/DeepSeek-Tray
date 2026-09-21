@@ -84,6 +84,9 @@ final class AuthManager: ObservableObject {
                          modifiedSince: Date(timeIntervalSince1970: 0)) {
             print("[AuthManager] signOut: WebKit session data cleared")
         }
+        // The HTTP cache holds raw usage/billing responses (token totals, API-key
+        // names) in the clear; signing out must not leave that transcript behind.
+        HTTPCachePurger.purge()
         state.googleSessionLinked = false
         if !deleted {
             print("[AuthManager] signOut: Keychain delete of googleToken FAILED — token survives (half-signed-out state)")

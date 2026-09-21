@@ -150,7 +150,7 @@ struct AuthView: View {
                 message = "Signed in to DeepSeek."
                 Task { await tracker.refresh() }
             } else {
-                message = "Sign-in failed or was cancelled."
+                message = "Automatic sign-in didn't complete. If a sign-in window opened, please finish there."
             }
         }
     }

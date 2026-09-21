@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:-0.2.0}"
 APP_NAME="DeepSeekTray"
 BUILD_DIR=".build/release"
 DIST="dist"
@@ -12,8 +12,20 @@ DIST="dist"
 echo "==> Building release binary for arm64 (Apple Silicon)..."
 swift build -c release --triple arm64-apple-macosx --disable-sandbox
 
-BIN=".build/arm64-apple-macosx/release/$APP_NAME"
+# Resolve the product instead of hardcoding a layout path. SwiftPM moved its
+# build products (.build/arm64-apple-macosx -> .build/out/Products/Release) when
+# the Xcode toolchain took over, leaving a stale binary at the old path that this
+# script would happily package.
+BIN_DIR="$(swift build -c release --triple arm64-apple-macosx --disable-sandbox --show-bin-path 2>/dev/null || true)"
+BIN="$BIN_DIR/$APP_NAME"
+[ -x "$BIN" ] || BIN=".build/release/$APP_NAME"
 [ -x "$BIN" ] || { echo "missing binary: $BIN"; exit 1; }
+
+# A stale app is worse than no app: it looks like a working build. Refuse to
+# package a binary older than the sources it claims to contain.
+STALE="$(find Sources -name '*.swift' -newer "$BIN" -print -quit)"
+[ -z "$STALE" ] || { echo "refusing to package: $BIN is older than $STALE"; exit 1; }
+echo "==> Packaging $BIN"
 
 STAGE="$DIST/$APP_NAME.app"
 rm -rf "$STAGE" "$DIST/$APP_NAME-$VERSION.zip"
