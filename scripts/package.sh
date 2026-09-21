@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-0.2.0}"
+VERSION="${1:-0.3.0}"
 APP_NAME="DeepSeekTray"
 BUILD_DIR=".build/release"
 DIST="dist"
