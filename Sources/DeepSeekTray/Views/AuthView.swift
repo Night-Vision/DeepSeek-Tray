@@ -42,7 +42,7 @@ struct AuthView: View {
 
     /// Version from the packaged Info.plist (release zip), falling back for `swift run`.
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.0"
     }
 
     private var header: some View {
